@@ -411,6 +411,14 @@ struct WalletListener
     }
 
     /**
+     * @brief called by Trezor Safe 7 (and newer) when pairing: the user rewrites
+     *        the 6-digit code shown on the device. Return none to cancel.
+     */
+    virtual optional<std::string> onDevicePairingCodeRequest() {
+        return optional<std::string>();
+    }
+
+    /**
      * @brief Signalizes device operation progress
      */
     virtual void onDeviceProgress(const DeviceProgress & event) { (void)event; };

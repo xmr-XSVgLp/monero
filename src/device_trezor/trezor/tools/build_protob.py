@@ -35,6 +35,9 @@ try:
         selected += ["messages-debug.proto"]
 
     proto_srcs = [os.path.join(TREZOR_COMMON, "protob", x) for x in selected]
+
+    # Trezor-Host Protocol (Safe 7 and newer), kept locally as trezor-common predates it
+    proto_srcs += [os.path.join(CWD, "..", "protob", "messages-thp.proto")]
     exec_args = [
         sys.executable,
         os.path.join(CWD, "pb2cpp.py"),

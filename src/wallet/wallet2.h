@@ -156,6 +156,7 @@ private:
     virtual void on_device_button_pressed() {}
     virtual boost::optional<epee::wipeable_string> on_device_pin_request() { return boost::none; }
     virtual boost::optional<epee::wipeable_string> on_device_passphrase_request(bool & on_device) { on_device = true; return boost::none; }
+    virtual boost::optional<std::string> on_device_pairing_code_request() { return boost::none; }
     virtual void on_device_progress(const hw::device_progress& event) {};
     // Common callbacks
     virtual void on_pool_tx_removed(const crypto::hash &txid) {}
@@ -170,6 +171,7 @@ private:
     void on_button_pressed() override;
     boost::optional<epee::wipeable_string> on_pin_request() override;
     boost::optional<epee::wipeable_string> on_passphrase_request(bool & on_device) override;
+    boost::optional<std::string> on_pairing_code_request() override;
     void on_progress(const hw::device_progress& event) override;
   private:
     wallet2 * wallet;
@@ -1964,6 +1966,7 @@ private:
     void on_device_button_pressed();
     boost::optional<epee::wipeable_string> on_device_pin_request();
     boost::optional<epee::wipeable_string> on_device_passphrase_request(bool & on_device);
+    boost::optional<std::string> on_device_pairing_code_request();
     void on_device_progress(const hw::device_progress& event);
 
     std::string get_rpc_status(const std::string &s) const;

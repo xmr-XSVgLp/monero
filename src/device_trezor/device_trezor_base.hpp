@@ -106,6 +106,11 @@ namespace trezor {
       bool m_always_use_empty_passphrase;
       bool m_seen_passphrase_entry_message;
 
+      // Trezor-Host Protocol (Safe 7 and newer); null for legacy devices
+      std::shared_ptr<ProtocolThp> m_thp;
+      bool m_thp_session_ready;
+      std::string m_thp_app_name;
+
 #ifdef WITH_TREZOR_DEBUGGING
       std::shared_ptr<trezor_debug_callback> m_debug_callback;
       bool m_debug;
@@ -123,6 +128,11 @@ namespace trezor {
       void test_ping();
       virtual void device_state_initialize_unsafe();
       void ensure_derivation_path() noexcept;
+
+      // THP connection and wallet session setup
+      void thp_connect();
+      void thp_create_session();
+      boost::optional<epee::wipeable_string> resolve_passphrase(bool & on_device);
 
       // Communication methods
 
@@ -313,6 +323,12 @@ namespace trezor {
      * Performs Initialize call to the Trezor, resets to known state.
      */
     void device_state_reset();
+
+    /**
+     * Application name shown on the Trezor when pairing (THP devices).
+     */
+    void set_thp_app_name(const std::string & name) { m_thp_app_name = name; }
+    bool is_thp() const { return static_cast<bool>(m_thp); }
 
     // Protocol callbacks
     void on_button_request(GenericMessage & resp, const messages::common::ButtonRequest * msg);

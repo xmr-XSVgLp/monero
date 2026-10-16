@@ -31,6 +31,7 @@ set(TREZOR_PROTOB_H
         trezor/messages/messages-common.pb.h
         trezor/messages/messages-management.pb.h
         trezor/messages/messages-monero.pb.h
+        trezor/messages/messages-thp.pb.h
 )
 
 set(TREZOR_PROTOB_CPP
@@ -38,12 +39,14 @@ set(TREZOR_PROTOB_CPP
         trezor/messages/messages-common.pb.cc
         trezor/messages/messages-management.pb.cc
         trezor/messages/messages-monero.pb.cc
+        trezor/messages/messages-thp.pb.cc
 )
 
 set(trezor_headers
         trezor/exceptions.hpp
         trezor/messages_map.hpp
         trezor/protocol.hpp
+        trezor/protocol_thp.hpp
         trezor/transport.hpp
         device_trezor_base.hpp
         device_trezor.hpp
@@ -54,6 +57,7 @@ set(trezor_headers
 set(trezor_sources
         trezor/messages_map.cpp
         trezor/protocol.cpp
+        trezor/protocol_thp.cpp
         trezor/transport.cpp
         device_trezor_base.cpp
         device_trezor.cpp
@@ -92,6 +96,7 @@ if(DEVICE_TREZOR_READY)
             ${Boost_CHRONO_LIBRARY}
             ${Protobuf_LIBRARY}
             ${TREZOR_LIBUSB_LIBRARIES}
+            ${OPENSSL_LIBRARIES}
             PRIVATE
             ${EXTRA_LIBRARIES})
 

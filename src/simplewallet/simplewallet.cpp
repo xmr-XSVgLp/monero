@@ -5957,6 +5957,16 @@ boost::optional<epee::wipeable_string> simple_wallet::on_device_pin_request()
   return pwd_container->password();
 }
 //----------------------------------------------------------------------------------------------------
+boost::optional<std::string> simple_wallet::on_device_pairing_code_request()
+{
+  PAUSE_READLINE();
+  message_writer(console_color_white, true) << tr("Pairing with Trezor: enter the 6-digit code shown on the device");
+  std::string code = input_line(tr("Pairing code"));
+  if (std::cin.eof() || code.empty())
+    return boost::none;
+  return code;
+}
+//----------------------------------------------------------------------------------------------------
 boost::optional<epee::wipeable_string> simple_wallet::on_device_passphrase_request(bool & on_device)
 {
   if (on_device) {

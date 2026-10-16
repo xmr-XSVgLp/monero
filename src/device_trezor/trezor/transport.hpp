@@ -156,6 +156,8 @@ namespace trezor {
     virtual void write(const google::protobuf::Message & req) =0;
     virtual void read(std::shared_ptr<google::protobuf::Message> & msg, messages::MessageType * msg_type=nullptr) =0;
     virtual std::shared_ptr<Transport> find_debug() { return nullptr; };
+    virtual std::shared_ptr<Protocol> get_protocol() const { return nullptr; };
+    virtual void set_protocol(std::shared_ptr<Protocol> proto) { };
 
     virtual void write_chunk(const void * buff, size_t size) { };
     virtual size_t read_chunk(void * buff, size_t size) { return 0; };
@@ -222,6 +224,8 @@ namespace trezor {
     void open() override;
     void close() override;
     std::shared_ptr<Transport> find_debug() override;
+    std::shared_ptr<Protocol> get_protocol() const override { return m_proto; }
+    void set_protocol(std::shared_ptr<Protocol> proto) override { m_proto = proto; }
 
     void write(const google::protobuf::Message &req) override;
     void read(std::shared_ptr<google::protobuf::Message> & msg, messages::MessageType * msg_type=nullptr) override;
@@ -270,6 +274,8 @@ namespace trezor {
     void open() override;
     void close() override;
     std::shared_ptr<Transport> find_debug() override;
+    std::shared_ptr<Protocol> get_protocol() const override { return m_proto; }
+    void set_protocol(std::shared_ptr<Protocol> proto) override { m_proto = proto; }
 
     void write(const google::protobuf::Message &req) override;
     void read(std::shared_ptr<google::protobuf::Message> & msg, messages::MessageType * msg_type=nullptr) override;

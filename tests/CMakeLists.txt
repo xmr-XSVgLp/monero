@@ -96,6 +96,10 @@ if (TREZOR_DEBUG)
   add_subdirectory(trezor)
 endif()
 
+if (USE_DEVICE_TREZOR)
+  add_subdirectory(trezor_thp)
+endif()
+
 # add_subdirectory(daemon_tests)
 
 set(hash_targets_sources

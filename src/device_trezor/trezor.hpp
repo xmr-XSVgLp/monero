@@ -39,6 +39,7 @@
 #include "trezor/messages/messages-management.pb.h"
 #include "trezor/messages/messages-monero.pb.h"
 #include "trezor/protocol.hpp"
+#include "trezor/protocol_thp.hpp"
 #endif
 
 #endif //MONERO_TREZOR_HPP

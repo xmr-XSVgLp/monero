@@ -33,6 +33,8 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/regex.hpp>
+#include <boost/asio/ip/host_name.hpp>
+#include "trezor/messages/messages-thp.pb.h"
 
 namespace hw {
 namespace trezor {
@@ -48,7 +50,9 @@ namespace trezor {
     device_trezor_base::device_trezor_base(): m_callback(nullptr), m_last_msg_type(messages::MessageType_Success),
                                               m_reply_with_empty_passphrase(false),
                                               m_always_use_empty_passphrase(false),
-                                              m_seen_passphrase_entry_message(false) {
+                                              m_seen_passphrase_entry_message(false),
+                                              m_thp_session_ready(false),
+                                              m_thp_app_name("Monero") {
 #ifdef WITH_TREZOR_DEBUGGING
       m_debug = false;
 #endif
@@ -143,6 +147,12 @@ namespace trezor {
 
         m_transport->open();
 
+        // Bridge transport has no raw protocol access, THP needs direct USB/UDP
+        if (m_transport->get_protocol() && is_thp_device(*m_transport)) {
+          MDEBUG("Device uses the Trezor-Host Protocol");
+          thp_connect();
+        }
+
 #ifdef WITH_TREZOR_DEBUGGING
         setup_debug();
 #endif
@@ -161,6 +171,11 @@ namespace trezor {
       m_seen_passphrase_entry_message = false;
       m_reply_with_empty_passphrase = false;
       m_always_use_empty_passphrase = false;
+      m_thp_session_ready = false;
+      if (m_thp){
+        m_thp->close();
+        m_thp = nullptr;
+      }
 
       if (m_transport){
         try {
@@ -372,6 +387,26 @@ namespace trezor {
     void device_trezor_base::device_state_initialize_unsafe()
     {
       require_connected();
+      if (m_thp){
+        if (!m_thp->is_connected()){
+          thp_connect();
+        }
+        // Features come from the seedless session 0, wallet calls go to our own session
+        const uint8_t wallet_session = m_thp->session_id();
+        m_thp->set_session_id(0);
+        try {
+          m_features = this->client_exchange<messages::management::Features>(std::make_shared<messages::management::GetFeatures>());
+        } catch(...) {
+          m_thp->set_session_id(wallet_session);
+          throw;
+        }
+        m_thp->set_session_id(wallet_session);
+        if (!m_thp_session_ready){
+          thp_create_session();
+        }
+        return;
+      }
+
       auto initMsg = std::make_shared<messages::management::Initialize>();
       const auto data_cleaner = epee::misc_utils::create_scope_leave_handler([&]() {
         if (initMsg->has_session_id())
@@ -394,6 +429,113 @@ namespace trezor {
     {
       TREZOR_AUTO_LOCK_CMD();
       device_state_initialize_unsafe();
+    }
+
+#ifdef WITH_TREZOR_DEBUGGING
+#define TREZOR_CALLBACK_GET_DEBUG(VAR, method, ...) do { \
+  if (m_debug_callback) VAR = m_debug_callback->method(__VA_ARGS__); \
+} while(0)
+#else
+#define TREZOR_CALLBACK_GET_DEBUG(VAR, method, ...) do { } while(0)
+#endif
+
+    void device_trezor_base::thp_connect()
+    {
+      require_connected();
+      if (!m_thp){
+        m_thp = std::make_shared<ProtocolThp>();
+        m_transport->set_protocol(m_thp);
+      }
+      m_thp_session_ready = false;
+
+      thp::Callbacks callbacks;
+      callbacks.on_pairing_code_request = [this]() -> boost::optional<std::string> {
+        boost::optional<std::string> code;
+        TREZOR_CALLBACK_GET_DEBUG(code, on_pairing_code_request);
+        if (m_callback) code = m_callback->on_pairing_code_request();
+        return code;
+      };
+      callbacks.on_button_request = [this](uint64_t code) {
+        if (m_callback) m_callback->on_button_request(code);
+      };
+      callbacks.on_button_pressed = [this]() {
+        if (m_callback) m_callback->on_button_pressed();
+      };
+
+      const char * cred_path = getenv("MONERO_TREZOR_THP_CREDENTIALS");
+      thp::FileCredentialStore store(cred_path && *cred_path ? std::string(cred_path) : thp::FileCredentialStore::default_path());
+
+      std::string host_name = "Monero host";
+      try {
+        host_name = boost::asio::ip::host_name();
+      } catch(const std::exception & e) {
+        MDEBUG("Cannot determine host name: " << e.what());
+      }
+
+      m_thp->connect(*m_transport, callbacks, store, host_name, m_thp_app_name);
+    }
+
+    boost::optional<epee::wipeable_string> device_trezor_base::resolve_passphrase(bool & on_device)
+    {
+      bool device_entry = false;
+      if (m_features){
+        for (auto it = m_features->capabilities().begin(); it != m_features->capabilities().end(); it++) {
+          if (*it == messages::management::Features::Capability_PassphraseEntry){
+            device_entry = true;
+          }
+        }
+      }
+
+      on_device = false;
+      if (m_reply_with_empty_passphrase || m_always_use_empty_passphrase) {
+        return epee::wipeable_string("");
+      }
+      if (m_passphrase) {
+        MWARNING("Answering passphrase prompt with a stored passphrase (do not use; passphrase can be seen by a potential malware / attacker)");
+        return m_passphrase;
+      }
+
+      on_device = device_entry;
+      boost::optional<epee::wipeable_string> passphrase;
+      TREZOR_CALLBACK_GET_DEBUG(passphrase, on_passphrase_request, on_device);
+      if (m_callback) passphrase = m_callback->on_passphrase_request(on_device);
+      if (!device_entry) on_device = false;
+      return passphrase;
+    }
+
+    void device_trezor_base::thp_create_session()
+    {
+      CHECK_AND_ASSERT_THROW_MES(m_thp && m_features, "THP channel is not ready");
+      messages::thp::ThpCreateNewSession req;
+      const auto data_cleaner = epee::misc_utils::create_scope_leave_handler([&]() {
+        if (req.has_passphrase())
+          memwipe(&(*req.mutable_passphrase())[0], req.mutable_passphrase()->size());
+      });
+
+      if (m_features->has_passphrase_protection() && m_features->passphrase_protection()){
+        m_seen_passphrase_entry_message = true;
+        bool on_device = false;
+        auto passphrase = resolve_passphrase(on_device);
+        if (on_device){
+          req.set_on_device(true);
+        } else {
+          req.set_passphrase(passphrase ? std::string(passphrase->data(), passphrase->size()) : std::string());
+        }
+      }
+
+      const uint8_t sid = m_thp->next_session_id();
+      m_thp->set_session_id(sid);
+      m_thp->write_app(*m_transport, thp::MT_THP_CREATE_NEW_SESSION, req);
+
+      auto resp = read_raw();
+      while (message_handler(resp)) { }
+      if (resp.m_type == messages::MessageType_Failure){
+        throw_failure_exception(dynamic_cast<messages::common::Failure *>(resp.m_msg.get()));
+      } else if (resp.m_type != messages::MessageType_Success){
+        throw exc::UnexpectedMessageException(resp.m_type, resp.m_msg);
+      }
+      m_thp_session_ready = true;
+      MDEBUG("THP wallet session " << (int)sid << " created");
     }
 
 #ifdef WITH_TREZOR_DEBUGGING

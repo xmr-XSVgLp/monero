@@ -32,6 +32,7 @@
 #include "messages/messages-common.pb.h"
 #include "messages/messages-management.pb.h"
 #include "messages/messages-monero.pb.h"
+#include "messages/messages-thp.pb.h"
 
 #ifdef WITH_TREZOR_DEBUGGING
 #include "messages/messages-debug.pb.h"
@@ -52,7 +53,8 @@ namespace trezor
 #ifdef WITH_TREZOR_DEBUGGING
       "hw.trezor.messages.debug.",
 #endif
-      "hw.trezor.messages.monero."
+      "hw.trezor.messages.monero.",
+      "hw.trezor.messages.thp."
   };
 
   google::protobuf::Message * MessageMapper::get_message(int wire_number) {
