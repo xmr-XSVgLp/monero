@@ -1,3 +1,37 @@
+# Monero — Trezor Safe 7 (THP) support (unofficial fork)
+
+> **This is an unofficial fork of [Monero](https://github.com/monero-project/monero).
+> It is not made, reviewed or endorsed by The Monero Project or by Trezor / SatoshiLabs.**
+> It handles real money: it is **experimental**, use it at your own risk and test with small amounts first.
+
+## What this fork adds
+
+The Trezor Safe 7 only talks the new **Trezor Host Protocol (THP)**: a Noise-encrypted channel with a
+one-time pairing step (the device shows a 6-digit code). The official Monero code does not support THP yet
+(see monero-project/monero#10368), so the Safe 7 cannot be used with it.
+
+The [`safe7-thp`](https://github.com/xmr-XSVgLp/monero/tree/safe7-thp) branch adds:
+
+- a THP transport for Monero's Trezor code (`src/device_trezor/trezor/protocol_thp.*`), over USB,
+- pairing with the 6-digit code and reuse of the stored pairing credential on later connections,
+- the hooks the wallet API, `monero-wallet-cli` and the GUI need to ask for that code,
+- `tests/trezor_thp/thp_tool`, a small command-line pairing/address test.
+
+It is used by the [Monero GUI Safe 7 Edition](https://github.com/xmr-XSVgLp/monero-gui/tree/safe7-matrix).
+
+Tested on **macOS (Apple Silicon) with a Trezor Safe 7**. Older Trezor models are untested with this branch.
+Close Trezor Suite first: the Safe 7 is used directly over USB, not through Trezor Bridge.
+
+## License
+
+Same as upstream: BSD 3-Clause, see [LICENSE](LICENSE). Copyright (c) 2014-2024, The Monero Project, plus the
+contributors of this fork. THP message definitions are adapted from trezor-firmware (`common/protob`).
+"Monero" and "Trezor" are used only to describe compatibility; they are trademarks of their respective owners.
+
+---
+
+*The original README of Monero follows.*
+
 # Monero
 
 Copyright (c) 2014-2022 The Monero Project.  
