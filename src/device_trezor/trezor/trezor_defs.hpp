@@ -50,6 +50,11 @@
 #define WITH_DEVICE_TREZOR_WEBUSB 1
 #endif
 
+// Bluetooth LE (Trezor Safe 7), macOS only for now; HAVE_TREZOR_BLE is set by cmake.
+#if defined(HAVE_TREZOR_BLE) && USE_DEVICE_TREZOR
+#define WITH_DEVICE_TREZOR_BLE 1
+#endif
+
 // Enable / disable UDP in the enumeration
 #ifndef USE_DEVICE_TREZOR_UDP
 #define USE_DEVICE_TREZOR_UDP 1

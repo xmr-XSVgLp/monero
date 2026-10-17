@@ -41,6 +41,9 @@
 #include "common/apply_permutation.h"
 #include "transport.hpp"
 #include "messages/messages-common.pb.h"
+#ifdef WITH_DEVICE_TREZOR_BLE
+#include "ble.hpp"
+#endif
 
 #undef MONERO_DEFAULT_LOG_CATEGORY
 #define MONERO_DEFAULT_LOG_CATEGORY "device.trezor.transport"
@@ -553,6 +556,20 @@ namespace trezor{
     }
 
     m_proto = proto ? proto.get() : std::make_shared<ProtocolV1>();
+    const char *env_ble = getenv("MONERO_TREZOR_UDP_BLE");
+    m_ble_emu = env_ble && std::string(env_ble) == "1";
+  }
+
+  void UdpTransport::ble_emu_event(uint8_t type){
+    // ble_event_t of the emulator: int type, int connection_id, uint8_t data_len, uint8_t data[6]
+    char ev[16];
+    memset(ev, 0, sizeof(ev));
+    ev[0] = static_cast<char>(type);
+    // own socket: the emulator answers events with status packets that must not reach read_chunk
+    udp::endpoint ep(m_endpoint.address(), static_cast<unsigned short>(m_device_port + 5));
+    udp::socket sock(m_io_service);
+    sock.open(udp::v4());
+    sock.send_to(boost::asio::buffer(ev, sizeof(ev)), ep);
   }
 
   std::string UdpTransport::get_path() const {
@@ -597,7 +614,8 @@ namespace trezor{
 
     try{
       t->open();
-      t_works = t->ping();
+      // the emulator's Bluetooth socket does not answer PINGPING
+      t_works = t->m_ble_emu || t->ping();
     } catch(...) {
 
     }
@@ -613,10 +631,13 @@ namespace trezor{
     }
 
     udp::resolver resolver(m_io_service);
-    m_endpoint = *resolver.resolve(udp::v4(), m_device_host, std::to_string(m_device_port)).begin();
+    m_endpoint = *resolver.resolve(udp::v4(), m_device_host, std::to_string(m_device_port + (m_ble_emu ? 4 : 0))).begin();
 
     m_socket.reset(new udp::socket(m_io_service));
     m_socket->open(udp::v4());
+    if (m_ble_emu){
+      ble_emu_event(1);  // BLE_CONNECTED
+    }
 
     m_deadline.expires_at(boost::posix_time::pos_infin);
     check_deadline();
@@ -636,6 +657,9 @@ namespace trezor{
     }
 
     m_proto->session_end(*this);
+    if (m_ble_emu){
+      try { ble_emu_event(2); } catch(...) {}  // BLE_DISCONNECTED
+    }
     m_socket->close();
     m_socket = nullptr;
   }
@@ -646,6 +670,7 @@ namespace trezor{
     t->m_proto = std::make_shared<ProtocolV1>();
     t->m_device_host = m_device_host;
     t->m_device_port = m_device_port + 1;
+    t->m_ble_emu = false;  // DebugLink stays on its own UDP port
     return t;
 #else
     MINFO("Debug link is disabled in production");
@@ -656,7 +681,7 @@ namespace trezor{
   void UdpTransport::write_chunk(const void * buff, size_t size){
     require_socket();
 
-    if (size != 64){
+    if (size != packet_size()){
       throw exc::CommunicationException("Invalid chunk size");
     }
 
@@ -668,7 +693,7 @@ namespace trezor{
 
   size_t UdpTransport::read_chunk(void * buff, size_t size){
     require_socket();
-    if (size < 64){
+    if (size < packet_size()){
       throw std::invalid_argument("Buffer too small");
     }
 
@@ -683,7 +708,7 @@ namespace trezor{
           throw exc::CommunicationException(std::string("Comm error: ") + ec.message());
         }
 
-        if (len != 64) {
+        if (static_cast<size_t>(len) != packet_size()) {
           throw exc::CommunicationException("Invalid chunk size");
         }
 
@@ -1168,6 +1193,116 @@ namespace trezor{
 
 #endif  // WITH_DEVICE_TREZOR_WEBUSB
 
+#ifdef WITH_DEVICE_TREZOR_BLE
+  //
+  // Bluetooth LE
+  //
+
+  const char * BleTransport::PATH_PREFIX = "ble:";
+
+  BleTransport::BleTransport(std::string id, std::string name) :
+      m_proto(std::make_shared<ProtocolV1>()), m_id(std::move(id)), m_name(std::move(name)) {}
+
+  BleTransport::~BleTransport(){
+    if (m_conn){
+      try { m_conn->close(); } catch(...) {}
+    }
+  }
+
+  std::string BleTransport::get_path() const {
+    return std::string(PATH_PREFIX) + m_id;
+  }
+
+  void BleTransport::enumerate(t_transport_vect & res) {
+    for (const auto & d : ble::scan(4.0)){
+      MDEBUG("Bluetooth Trezor found: " << d.id << " (" << d.name << ")");
+      res.push_back(std::make_shared<BleTransport>(d.id, d.name));
+    }
+  }
+
+  void BleTransport::open() {
+    if (!pre_open()){
+      return;
+    }
+    try {
+      if (m_id.empty()){
+        const auto devices = ble::scan(4.0);
+        if (devices.empty()){
+          throw std::runtime_error("No Trezor found over Bluetooth");
+        }
+        m_id = devices.front().id;
+        m_name = devices.front().name;
+      }
+      m_conn = ble::open(m_id);
+    } catch (const std::runtime_error & e){
+      throw exc::CommunicationException(e.what());
+    }
+    m_proto->session_begin(*this);
+    m_open_counter = 1;
+  }
+
+  void BleTransport::close() {
+    if (!pre_close()){
+      return;
+    }
+    MTRACE("Closing Trezor:BleTransport");
+    m_proto->session_end(*this);
+    if (m_conn){
+      m_conn->close();
+      m_conn.reset();
+    }
+  }
+
+  void BleTransport::write(const google::protobuf::Message &req) {
+    m_proto->write(*this, req);
+  }
+
+  void BleTransport::read(std::shared_ptr<google::protobuf::Message> & msg, messages::MessageType * msg_type) {
+    m_proto->read(*this, msg, msg_type);
+  }
+
+  void BleTransport::write_chunk(const void * buff, size_t size) {
+    if (!m_conn){
+      throw exc::NotConnectedException("Bluetooth Trezor not connected");
+    }
+    if (size != packet_size()){
+      throw exc::CommunicationException("Invalid chunk size");
+    }
+    try {
+      m_conn->write(buff, size);
+    } catch (const std::runtime_error & e){
+      throw exc::CommunicationException(e.what());
+    }
+  }
+
+  size_t BleTransport::read_chunk(void * buff, size_t size) {
+    if (!m_conn){
+      throw exc::NotConnectedException("Bluetooth Trezor not connected");
+    }
+    if (size < packet_size()){
+      throw std::invalid_argument("Buffer too small");
+    }
+    size_t n = 0;
+    try {
+      // THP waits here while the user confirms on the device, so no timeout
+      n = m_conn->read(buff, size, -1);
+    } catch (const std::runtime_error & e){
+      throw exc::CommunicationException(e.what());
+    }
+    if (n == 0 || n > packet_size()){
+      throw exc::CommunicationException("Invalid Bluetooth packet size");
+    }
+    if (n < packet_size()){
+      memset(static_cast<char *>(buff) + n, 0, packet_size() - n);
+    }
+    return packet_size();
+  }
+
+  std::ostream& BleTransport::dump(std::ostream& o) const {
+    return o << "BleTransport<path=" << get_path() << ", name=" << m_name << ">";
+  }
+#endif  // WITH_DEVICE_TREZOR_BLE
+
   void enumerate(t_transport_vect & res){
     BridgeTransport bt;
     try{
@@ -1191,6 +1326,21 @@ namespace trezor{
       btu.enumerate(res);
     } catch (const std::exception & e){
       MERROR("UdpTransport enumeration failed:" << e.what());
+    }
+#endif
+
+#ifdef WITH_DEVICE_TREZOR_BLE
+    // A Bluetooth scan takes a few seconds, so only look when no Trezor is connected by cable.
+    // MONERO_TREZOR_BLE=1 always scans, MONERO_TREZOR_BLE=0 never does.
+    const char * env_ble = getenv("MONERO_TREZOR_BLE");
+    const std::string ble_mode = env_ble ? env_ble : "";
+    if (ble_mode != "0" && (res.empty() || ble_mode == "1")){
+      hw::trezor::BleTransport btb;
+      try{
+        btb.enumerate(res);
+      } catch (const std::exception & e){
+        MERROR("BleTransport enumeration failed: " << e.what());
+      }
     }
 #endif
   }
@@ -1234,6 +1384,11 @@ namespace trezor{
 
     } else if (boost::starts_with(path, UdpTransport::PATH_PREFIX)){
       return std::make_shared<UdpTransport>(path.substr(strlen(UdpTransport::PATH_PREFIX)));
+
+#ifdef WITH_DEVICE_TREZOR_BLE
+    } else if (boost::starts_with(path, BleTransport::PATH_PREFIX)){
+      return std::make_shared<BleTransport>(path.substr(strlen(BleTransport::PATH_PREFIX)));
+#endif
 
     } else {
       throw std::invalid_argument("Unknown Trezor device path: " + path);

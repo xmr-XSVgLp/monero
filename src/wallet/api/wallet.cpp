@@ -41,6 +41,7 @@
 
 #include "mnemonics/electrum-words.h"
 #include "mnemonics/english.h"
+#include "device_trezor/device_trezor.hpp"
 #include <boost/format.hpp>
 #include <sstream>
 #include <unordered_map>
@@ -746,6 +747,52 @@ bool WalletImpl::recoverFromDevice(const std::string &path, const std::string &p
 Wallet::Device WalletImpl::getDeviceType() const
 {
     return static_cast<Wallet::Device>(m_wallet->get_device_type());
+}
+
+std::string WalletImpl::getDeviceLabel() const
+{
+#ifdef WITH_DEVICE_TREZOR
+    try {
+        auto *trezor = dynamic_cast<hw::trezor::device_trezor_base *>(&m_wallet->get_account().get_device());
+        if (!trezor)
+            return "";
+        const auto &features = trezor->get_features();
+        if (!features)
+            return "";
+        if (features->has_label() && !features->label().empty())
+            return features->label();
+        // no label set on the device: use the model, e.g. "Trezor Safe 7"
+        if (features->has_model() && !features->model().empty())
+            return features->model() == "T3W1" ? "Trezor Safe 7" : "Trezor " + features->model();
+        return "Trezor";
+    } catch (const std::exception &e) {
+        LOG_ERROR("Could not read the device label: " << e.what());
+    }
+#endif
+    return "";
+}
+
+std::string WalletImpl::deviceCipherKeyValue(const std::string &key, const std::string &value, std::string &error)
+{
+#ifdef WITH_DEVICE_TREZOR
+    try {
+        auto *trezor = dynamic_cast<hw::trezor::device_trezor *>(&m_wallet->get_account().get_device());
+        if (!trezor) {
+            error = "not a Trezor wallet";
+            return "";
+        }
+        // SLIP-11 path m/10016'/0'
+        const std::vector<uint32_t> path{0x80000000u | 10016u, 0x80000000u};
+        return trezor->cipher_key_value(path, key, value, true, true, true);
+    } catch (const std::exception &e) {
+        LOG_ERROR("CipherKeyValue failed: " << e.what());
+        error = e.what();
+        return "";
+    }
+#else
+    error = "Trezor support is not built in";
+    return "";
+#endif
 }
 
 bool WalletImpl::open(const std::string &path, const std::string &password)

@@ -147,8 +147,8 @@ namespace trezor {
 
         m_transport->open();
 
-        // Bridge transport has no raw protocol access, THP needs direct USB/UDP
-        if (m_transport->get_protocol() && is_thp_device(*m_transport)) {
+        // Bridge transport has no raw protocol access, THP needs direct USB/UDP/Bluetooth
+        if (m_transport->get_protocol() && (m_transport->requires_thp() || is_thp_device(*m_transport))) {
           MDEBUG("Device uses the Trezor-Host Protocol");
           thp_connect();
         }

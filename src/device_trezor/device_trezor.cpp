@@ -217,6 +217,8 @@ namespace trezor {
 
     void device_trezor::reset_session() {
       m_device_session_id.clear();
+      // THP keeps the passphrase in its wallet session: start a new one so the passphrase is asked again
+      m_thp_session_ready = false;
     }
 
     bool device_trezor::seen_passphrase_entry_prompt() {
@@ -277,6 +279,32 @@ namespace trezor {
       auto response = this->client_exchange<messages::monero::MoneroWatchKey>(req);
       MTRACE("Get watch key response received");
       return response;
+    }
+
+    std::string device_trezor::cipher_key_value(
+        const std::vector<uint32_t> & path,
+        const std::string & key,
+        const std::string & value,
+        bool encrypt,
+        bool ask_on_encrypt,
+        bool ask_on_decrypt){
+      TREZOR_AUTO_LOCK_CMD();
+      require_connected();
+      device_state_initialize_unsafe();
+      require_initialized();
+
+      auto req = std::make_shared<messages::crypto::CipherKeyValue>();
+      for (const uint32_t index : path)
+        req->add_address_n(index);
+      req->set_key(key);
+      req->set_value(value);
+      req->set_encrypt(encrypt);
+      req->set_ask_on_encrypt(ask_on_encrypt);
+      req->set_ask_on_decrypt(ask_on_decrypt);
+
+      auto response = this->client_exchange<messages::crypto::CipheredKeyValue>(req);
+      MTRACE("CipherKeyValue response received");
+      return response->value();
     }
 
     bool device_trezor::is_get_tx_key_supported() const

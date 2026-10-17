@@ -566,32 +566,33 @@ namespace thp {
     msg.append(1, static_cast<char>(ctrl)).append(be16(cid)).append(be16(static_cast<uint16_t>(payload.size() + CHECKSUM_SIZE))).append(payload);
     msg.append(be32(crypto::crc32(msg)));
 
-    char chunk[PACKET_SIZE];
-    size_t off = std::min(msg.size(), PACKET_SIZE);
-    memset(chunk, 0, PACKET_SIZE);
-    memcpy(chunk, msg.data(), off);
-    transport.write_chunk(chunk, PACKET_SIZE);
+    const size_t psize = transport.packet_size();
+    std::string chunk(psize, '\0');
+    size_t off = std::min(msg.size(), psize);
+    memcpy(&chunk[0], msg.data(), off);
+    transport.write_chunk(chunk.data(), psize);
 
     const std::string cont_header = std::string(1, static_cast<char>(CTRL_CONTINUATION)) + be16(cid);
     while (off < msg.size()){
-      const size_t n = std::min(msg.size() - off, PACKET_SIZE - CONT_HEADER_SIZE);
-      memset(chunk, 0, PACKET_SIZE);
-      memcpy(chunk, cont_header.data(), CONT_HEADER_SIZE);
-      memcpy(chunk + CONT_HEADER_SIZE, msg.data() + off, n);
-      transport.write_chunk(chunk, PACKET_SIZE);
+      const size_t n = std::min(msg.size() - off, psize - CONT_HEADER_SIZE);
+      std::fill(chunk.begin(), chunk.end(), '\0');
+      memcpy(&chunk[0], cont_header.data(), CONT_HEADER_SIZE);
+      memcpy(&chunk[CONT_HEADER_SIZE], msg.data() + off, n);
+      transport.write_chunk(chunk.data(), psize);
       off += n;
     }
-    memwipe(chunk, sizeof(chunk));
+    wipe(chunk);
     wipe(msg);
   }
 
   void ProtocolThp::read_packets(Transport & transport, uint8_t & ctrl, uint16_t & cid, std::string & payload){
-    std::string chunk(PACKET_SIZE, '\0');
+    const size_t psize = transport.packet_size();
+    std::string chunk(psize, '\0');
     bool have_chunk = false;
     while (true){
       if (!have_chunk){
-        const size_t n = transport.read_chunk(&chunk[0], PACKET_SIZE);
-        if (n != PACKET_SIZE){
+        const size_t n = transport.read_chunk(&chunk[0], psize);
+        if (n != psize){
           throw exc::CommunicationException("THP: read chunk has invalid size");
         }
       }
@@ -612,8 +613,8 @@ namespace thp {
 
       std::string data = chunk.substr(INIT_HEADER_SIZE);
       while (data.size() < len){
-        const size_t n = transport.read_chunk(&chunk[0], PACKET_SIZE);
-        if (n != PACKET_SIZE){
+        const size_t n = transport.read_chunk(&chunk[0], psize);
+        if (n != psize){
           throw exc::CommunicationException("THP: read chunk has invalid size");
         }
         if (static_cast<uint8_t>(chunk[0]) != CTRL_CONTINUATION){

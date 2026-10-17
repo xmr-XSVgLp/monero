@@ -80,6 +80,8 @@ public:
                            const std::string &password,
                            const std::string &device_name);
     Device getDeviceType() const override;
+    std::string getDeviceLabel() const override;
+    std::string deviceCipherKeyValue(const std::string &key, const std::string &value, std::string &error) override;
     bool close(bool store = true);
     std::string seed(const std::string& seed_offset = "") const override;
     std::string getSeedLanguage() const override;

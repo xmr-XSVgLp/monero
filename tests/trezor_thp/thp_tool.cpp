@@ -30,7 +30,9 @@
 // Manual test tool for Trezor devices using the Trezor-Host Protocol (Safe 7).
 // Connects (pairing if needed), prints the device model and the Monero address.
 //
-//   thp_tool [device path, e.g. udp:127.0.0.1:21324 or webusb]
+//   thp_tool [device path, e.g. udp:127.0.0.1:21324, webusb or ble]
+//   Bluetooth (macOS): MONERO_TREZOR_BLE=1 thp_tool ble   (scans even with a cable connected)
+//   Emulator Bluetooth interface: MONERO_TREZOR_UDP_BLE=1 thp_tool udp
 //
 // The pairing code is read from stdin, or from the file named by THP_CODE_FILE
 // when it appears (used for automated emulator tests).
@@ -50,9 +52,10 @@ namespace {
     void on_button_request(uint64_t code) override { std::cout << "[device] confirm on the Trezor (button request " << code << ")" << std::endl; }
     void on_button_pressed() override { std::cout << "[device] confirmed" << std::endl; }
     boost::optional<epee::wipeable_string> on_passphrase_request(bool & on_device) override {
-      std::cout << "[device] passphrase requested, using empty passphrase" << std::endl;
+      const char * pp = getenv("THP_PASSPHRASE");
+      std::cout << "[device] passphrase requested, using " << (pp ? "THP_PASSPHRASE" : "an empty passphrase") << std::endl;
       on_device = false;
-      return epee::wipeable_string("");
+      return epee::wipeable_string(pp ? pp : "");
     }
     boost::optional<std::string> on_pairing_code_request() override {
       const char * f = getenv("THP_CODE_FILE");
@@ -103,6 +106,16 @@ int main(int argc, char ** argv)
       return 1;
     }
     std::cout << "connected, THP: " << (dev.is_thp() ? "yes" : "no") << std::endl;
+
+    if (getenv("THP_OPEN_FLOW")) {
+      // Same steps as wallet2 when opening a Trezor wallet: empty passphrase first, then the real one
+      cryptonote::account_public_address a0, a1;
+      if (!dev.get_public_address_with_no_passphrase(a0)) { std::cerr << "FAIL: no-passphrase address" << std::endl; return 1; }
+      dev.reset_session();
+      if (!dev.get_public_address(a1)) { std::cerr << "FAIL: passphrase address" << std::endl; return 1; }
+      std::cout << "address (empty passphrase): " << cryptonote::get_account_address_as_str(cryptonote::MAINNET, false, a0) << std::endl;
+      std::cout << "address (passphrase):       " << cryptonote::get_account_address_as_str(cryptonote::MAINNET, false, a1) << std::endl;
+    }
 
     dev.device_state_reset();
     cryptonote::account_public_address addr;

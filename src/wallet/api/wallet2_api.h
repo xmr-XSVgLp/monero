@@ -1155,6 +1155,21 @@ struct Wallet
      */
     virtual Device getDeviceType() const = 0;
 
+    /*!
+     * \brief Name of the hardware wallet the keys are on (the label set on the device)
+     * \return label, or empty when the wallet is not on a hardware device
+     */
+    virtual std::string getDeviceLabel() const { return ""; }
+
+    /**
+     * @brief deviceCipherKeyValue - SLIP-11 CipherKeyValue on the Trezor (path m/10016'/0'):
+     *        encrypts `value` (a multiple of 16 bytes) with a key derived on the device from its
+     *        seed and passphrase, after the user confirms `key` on the device. Deterministic, so
+     *        the result can be used as a secret that only this device can produce.
+     * @return the encrypted value, or "" with `error` set (no Trezor, cancelled, ...)
+     */
+    virtual std::string deviceCipherKeyValue(const std::string &key, const std::string &value, std::string &error) { (void)key; (void)value; error = "not supported"; return ""; }
+
     //! cold-device protocol key image sync
     virtual uint64_t coldKeyImageSync(uint64_t &spent, uint64_t &unspent) = 0;
 

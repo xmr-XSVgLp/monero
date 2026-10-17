@@ -29,6 +29,7 @@ try:
         "messages-common.proto",
         "messages-management.proto",
         "messages-monero.proto",
+        "messages-crypto.proto",  # CipherKeyValue (SLIP-11), used by XMR Wallet+ encrypted notes
     ]
 
     if args.debug_msg:

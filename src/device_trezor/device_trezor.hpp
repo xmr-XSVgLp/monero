@@ -135,6 +135,19 @@ namespace trezor {
           const boost::optional<cryptonote::network_type> & network_type = boost::none);
 
       /**
+       * SLIP-11 CipherKeyValue: encrypts (or decrypts) `value` with a key the device derives from
+       * its seed and passphrase at `path`. Deterministic for the same path, key and value, so it
+       * also works as a device-bound secret. `value` must be a multiple of 16 bytes. Throws.
+       */
+      std::string cipher_key_value(
+          const std::vector<uint32_t> & path,
+          const std::string & key,
+          const std::string & value,
+          bool encrypt,
+          bool ask_on_encrypt,
+          bool ask_on_decrypt);
+
+      /**
        * Get_tx_key support check
        */
       bool is_get_tx_key_supported() const override;

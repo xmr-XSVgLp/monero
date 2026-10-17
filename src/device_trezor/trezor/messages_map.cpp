@@ -32,6 +32,7 @@
 #include "messages/messages-common.pb.h"
 #include "messages/messages-management.pb.h"
 #include "messages/messages-monero.pb.h"
+#include "messages/messages-crypto.pb.h"
 #include "messages/messages-thp.pb.h"
 
 #ifdef WITH_TREZOR_DEBUGGING
@@ -54,6 +55,7 @@ namespace trezor
       "hw.trezor.messages.debug.",
 #endif
       "hw.trezor.messages.monero.",
+      "hw.trezor.messages.crypto.",
       "hw.trezor.messages.thp."
   };
 
@@ -76,6 +78,7 @@ namespace trezor
     hw::trezor::messages::common::Success::default_instance();
     hw::trezor::messages::management::Cancel::default_instance();
     hw::trezor::messages::monero::MoneroGetAddress::default_instance();
+    hw::trezor::messages::crypto::CipherKeyValue::default_instance();
 
 #ifdef WITH_TREZOR_DEBUGGING
     hw::trezor::messages::debug::DebugLinkDecision::default_instance();

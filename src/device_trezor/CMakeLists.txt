@@ -31,6 +31,7 @@ set(TREZOR_PROTOB_H
         trezor/messages/messages-common.pb.h
         trezor/messages/messages-management.pb.h
         trezor/messages/messages-monero.pb.h
+        trezor/messages/messages-crypto.pb.h
         trezor/messages/messages-thp.pb.h
 )
 
@@ -39,6 +40,7 @@ set(TREZOR_PROTOB_CPP
         trezor/messages/messages-common.pb.cc
         trezor/messages/messages-management.pb.cc
         trezor/messages/messages-monero.pb.cc
+        trezor/messages/messages-crypto.pb.cc
         trezor/messages/messages-thp.pb.cc
 )
 
@@ -65,6 +67,17 @@ set(trezor_sources
 )
 
 set(trezor_private_headers)
+
+# Bluetooth LE transport (Trezor Safe 7), macOS only: CoreBluetooth via Objective-C++
+if(APPLE AND NOT IOS AND NOT DEFINED USE_DEVICE_TREZOR_BLE)
+    set(USE_DEVICE_TREZOR_BLE ON)
+endif()
+if(USE_DEVICE_TREZOR_BLE)
+    list(APPEND trezor_headers trezor/ble.hpp)
+    list(APPEND trezor_sources trezor/ble_macos.mm)
+    # compiled by the C++ compiler as Objective-C++, so the OBJCXX language need not be enabled
+    set_source_files_properties(trezor/ble_macos.mm PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x objective-c++ -fobjc-arc")
+endif()
 
 
 # Protobuf and LibUSB processed by CheckTrezor
@@ -99,6 +112,12 @@ if(DEVICE_TREZOR_READY)
             ${OPENSSL_LIBRARIES}
             PRIVATE
             ${EXTRA_LIBRARIES})
+
+    if(USE_DEVICE_TREZOR_BLE)
+        message(STATUS "Trezor Bluetooth (CoreBluetooth) enabled")
+        target_compile_definitions(device_trezor PUBLIC HAVE_TREZOR_BLE=1)
+        target_link_libraries(device_trezor PUBLIC "-framework Foundation" "-framework CoreBluetooth")
+    endif()
 
 else()
     message(STATUS "Trezor support disabled")

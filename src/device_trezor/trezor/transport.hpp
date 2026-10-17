@@ -162,6 +162,11 @@ namespace trezor {
     virtual void write_chunk(const void * buff, size_t size) { };
     virtual size_t read_chunk(void * buff, size_t size) { return 0; };
     virtual std::ostream& dump(std::ostream& o) const { return o << "Transport<>"; }
+
+    // Size of one raw packet: 64 B over USB/UDP, 244 B over Bluetooth LE.
+    virtual size_t packet_size() const { return 64; }
+    // Bluetooth only carries THP, so the legacy-protocol probe is skipped there.
+    virtual bool requires_thp() const { return false; }
   protected:
     long m_open_counter;
 
@@ -235,7 +240,13 @@ namespace trezor {
 
     std::ostream& dump(std::ostream& o) const override;
 
+    // MONERO_TREZOR_UDP_BLE=1 talks to the emulator's Bluetooth interface (port + 4,
+    // 244 B packets) instead of its USB one, to test THP over Bluetooth without hardware.
+    size_t packet_size() const override { return m_ble_emu ? 244 : 64; }
+    bool requires_thp() const override { return m_ble_emu; }
+
   private:
+    void ble_emu_event(uint8_t type);
     void require_socket();
     ssize_t receive(void * buff, size_t size, boost::system::error_code * error_code=nullptr, bool no_throw=false, boost::posix_time::time_duration timeout=boost::posix_time::seconds(10));
     void check_deadline();
@@ -246,6 +257,7 @@ namespace trezor {
     std::shared_ptr<Protocol> m_proto;
     std::string m_device_host;
     int m_device_port;
+    bool m_ble_emu;
 
     std::unique_ptr<udp::socket> m_socket;
     boost::asio::io_context m_io_service;
@@ -306,6 +318,45 @@ namespace trezor {
 #endif
   };
 
+#endif
+
+#ifdef WITH_DEVICE_TREZOR_BLE
+  namespace ble { class Connection; }
+
+  // Bluetooth LE transport for the Trezor Safe 7 (macOS, CoreBluetooth). Only THP runs over it.
+  // Path: "ble:<CoreBluetooth peripheral UUID>".
+  class BleTransport : public Transport {
+  public:
+    explicit BleTransport(std::string id = "", std::string name = "");
+    virtual ~BleTransport();
+
+    static const char * PATH_PREFIX;
+
+    std::string get_path() const override;
+    void enumerate(t_transport_vect & res) override;
+
+    void open() override;
+    void close() override;
+    std::shared_ptr<Protocol> get_protocol() const override { return m_proto; }
+    void set_protocol(std::shared_ptr<Protocol> proto) override { m_proto = proto; }
+
+    void write(const google::protobuf::Message &req) override;
+    void read(std::shared_ptr<google::protobuf::Message> & msg, messages::MessageType * msg_type=nullptr) override;
+
+    void write_chunk(const void * buff, size_t size) override;
+    size_t read_chunk(void * buff, size_t size) override;
+
+    size_t packet_size() const override { return 244; }
+    bool requires_thp() const override { return true; }
+
+    std::ostream& dump(std::ostream& o) const override;
+
+  private:
+    std::shared_ptr<Protocol> m_proto;
+    std::string m_id;
+    std::string m_name;
+    std::unique_ptr<ble::Connection> m_conn;
+  };
 #endif
 
   //
