@@ -33,6 +33,7 @@ set(TREZOR_PROTOB_H
         trezor/messages/messages-monero.pb.h
         trezor/messages/messages-crypto.pb.h
         trezor/messages/messages-thp.pb.h
+        trezor/messages/messages-wplus.pb.h
 )
 
 set(TREZOR_PROTOB_CPP
@@ -42,6 +43,7 @@ set(TREZOR_PROTOB_CPP
         trezor/messages/messages-monero.pb.cc
         trezor/messages/messages-crypto.pb.cc
         trezor/messages/messages-thp.pb.cc
+        trezor/messages/messages-wplus.pb.cc
 )
 
 set(trezor_headers

@@ -925,6 +925,7 @@ namespace nodetool
       network_zone& public_zone = m_network_zones[epee::net_utils::zone::public_];
       public_zone.m_connect = &socks_connect;
       public_zone.m_proxy_address = *endpoint;
+      m_payload_handler.set_proxy_sync(true);
       public_zone.m_can_pingback = false;
       m_enable_dns_seed_nodes &= proxy_dns_leaks_allowed;
       m_enable_dns_blocklist &= proxy_dns_leaks_allowed;
@@ -1237,7 +1238,7 @@ namespace nodetool
         LOG_DEBUG_CC(context, " COMMAND_HANDSHAKE(AND CLOSE) INVOKED OK");
       }
       context_ = context;
-    }, P2P_DEFAULT_HANDSHAKE_INVOKE_TIMEOUT);
+    }, zone.m_connect == &socks_connect ? 60000 : P2P_DEFAULT_HANDSHAKE_INVOKE_TIMEOUT);
 
     if(r)
     {

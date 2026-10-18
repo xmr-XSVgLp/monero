@@ -34,6 +34,7 @@
 #include "messages/messages-monero.pb.h"
 #include "messages/messages-crypto.pb.h"
 #include "messages/messages-thp.pb.h"
+#include "messages/messages-wplus.pb.h"
 
 #ifdef WITH_TREZOR_DEBUGGING
 #include "messages/messages-debug.pb.h"
@@ -56,8 +57,12 @@ namespace trezor
 #endif
       "hw.trezor.messages.monero.",
       "hw.trezor.messages.crypto.",
-      "hw.trezor.messages.thp."
+      "hw.trezor.messages.thp.",
+      "hw.trezor.messages.wplus."
   };
+
+  // wire ids the bundled messages.proto does not know (device settings, messages-wplus.proto)
+  const char * WPLUS_TYPE_PREFIX = "WplusMessageType_";
 
   google::protobuf::Message * MessageMapper::get_message(int wire_number) {
     return MessageMapper::get_message(static_cast<messages::MessageType>(wire_number));
@@ -66,6 +71,12 @@ namespace trezor
   google::protobuf::Message * MessageMapper::get_message(messages::MessageType wire_number) {
     const string &messageTypeName = hw::trezor::messages::MessageType_Name(wire_number);
     if (messageTypeName.empty()) {
+      const int number = static_cast<int>(wire_number);
+      if (hw::trezor::messages::wplus::WplusMessageType_IsValid(number)) {
+        const string wplusName = hw::trezor::messages::wplus::WplusMessageType_Name(
+            static_cast<hw::trezor::messages::wplus::WplusMessageType>(number));
+        return MessageMapper::get_message(wplusName.substr(strlen(WPLUS_TYPE_PREFIX)));
+      }
       throw exc::EncodingException(std::string("Message descriptor not found: ") + std::to_string(wire_number));
     }
 
@@ -79,6 +90,7 @@ namespace trezor
     hw::trezor::messages::management::Cancel::default_instance();
     hw::trezor::messages::monero::MoneroGetAddress::default_instance();
     hw::trezor::messages::crypto::CipherKeyValue::default_instance();
+    hw::trezor::messages::wplus::SetBrightness::default_instance();
 
 #ifdef WITH_TREZOR_DEBUGGING
     hw::trezor::messages::debug::DebugLinkDecision::default_instance();
@@ -131,6 +143,10 @@ namespace trezor
     messages::MessageType res;
     bool r = hw::trezor::messages::MessageType_Parse(enumMessageName, &res);
     if (!r){
+      hw::trezor::messages::wplus::WplusMessageType wplus;
+      if (hw::trezor::messages::wplus::WplusMessageType_Parse(std::string(WPLUS_TYPE_PREFIX) + msg_name, &wplus)) {
+        return static_cast<messages::MessageType>(static_cast<int>(wplus));
+      }
       throw exc::EncodingException(std::string("Message ") + msg_name + " not found");
     }
 

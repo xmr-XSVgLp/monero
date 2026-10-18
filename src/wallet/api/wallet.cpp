@@ -795,6 +795,83 @@ std::string WalletImpl::deviceCipherKeyValue(const std::string &key, const std::
 #endif
 }
 
+std::string WalletImpl::deviceFeatures(std::string &error)
+{
+#ifdef WITH_DEVICE_TREZOR
+    try {
+        auto *trezor = dynamic_cast<hw::trezor::device_trezor *>(&m_wallet->get_account().get_device());
+        if (!trezor) {
+            error = "not a Trezor wallet";
+            return "";
+        }
+        return trezor->device_features_json();
+    } catch (const std::exception &e) {
+        LOG_ERROR("Reading the device features failed: " << e.what());
+        error = e.what();
+        return "";
+    }
+#else
+    error = "Trezor support is not built in";
+    return "";
+#endif
+}
+
+bool WalletImpl::deviceApplySettings(bool setLabel, const std::string &label, int64_t autoLockMs, int haptic,
+                                     bool setHomescreen, const std::string &homescreen, std::string &error)
+{
+#ifdef WITH_DEVICE_TREZOR
+    try {
+        auto *trezor = dynamic_cast<hw::trezor::device_trezor *>(&m_wallet->get_account().get_device());
+        if (!trezor) {
+            error = "not a Trezor wallet";
+            return false;
+        }
+        boost::optional<std::string> newLabel, newHomescreen;
+        boost::optional<uint32_t> newAutoLock;
+        boost::optional<bool> newHaptic;
+        if (setLabel)
+            newLabel = label;
+        if (autoLockMs >= 0)
+            newAutoLock = static_cast<uint32_t>(autoLockMs);
+        if (haptic >= 0)
+            newHaptic = haptic != 0;
+        if (setHomescreen)
+            newHomescreen = homescreen;
+        trezor->apply_device_settings(newLabel, newAutoLock, newHaptic, newHomescreen);
+        return true;
+    } catch (const std::exception &e) {
+        LOG_ERROR("Applying the device settings failed: " << e.what());
+        error = e.what();
+        return false;
+    }
+#else
+    error = "Trezor support is not built in";
+    return false;
+#endif
+}
+
+bool WalletImpl::deviceSetBrightness(std::string &error)
+{
+#ifdef WITH_DEVICE_TREZOR
+    try {
+        auto *trezor = dynamic_cast<hw::trezor::device_trezor *>(&m_wallet->get_account().get_device());
+        if (!trezor) {
+            error = "not a Trezor wallet";
+            return false;
+        }
+        trezor->set_device_brightness();
+        return true;
+    } catch (const std::exception &e) {
+        LOG_ERROR("Setting the device brightness failed: " << e.what());
+        error = e.what();
+        return false;
+    }
+#else
+    error = "Trezor support is not built in";
+    return false;
+#endif
+}
+
 bool WalletImpl::open(const std::string &path, const std::string &password)
 {
     clearStatus();

@@ -113,6 +113,7 @@ namespace cryptonote
     const block_queue &get_block_queue() const { return m_block_queue; }
     void stop();
     void on_connection_close(cryptonote_connection_context &context);
+    void set_proxy_sync(bool enabled) { m_proxy_sync = enabled; }
     void set_max_out_peers(epee::net_utils::zone zone, unsigned int max) { CRITICAL_REGION_LOCAL(m_max_out_peers_lock); m_max_out_peers[zone] = max; }
     unsigned int get_max_out_peers(epee::net_utils::zone zone) const
     {
@@ -183,6 +184,7 @@ namespace cryptonote
     epee::math_helper::once_a_time_milliseconds<100> m_standby_checker;
     epee::math_helper::once_a_time_seconds<101> m_sync_search_checker;
     epee::math_helper::once_a_time_seconds<43> m_bad_peer_checker;
+    bool m_proxy_sync = false; // configured before the networking threads start
     std::unordered_map<epee::net_utils::zone, unsigned int> m_max_out_peers;
     mutable epee::critical_section m_max_out_peers_lock;
     tools::PerformanceTimer m_sync_timer, m_add_timer;

@@ -1170,6 +1170,28 @@ struct Wallet
      */
     virtual std::string deviceCipherKeyValue(const std::string &key, const std::string &value, std::string &error) { (void)key; (void)value; error = "not supported"; return ""; }
 
+    /**
+     * @brief deviceFeatures - reads the Trezor settings again (label, model, version, haptics,
+     *        auto-lock, homescreen size) as a flat JSON object
+     * @return the JSON, or "" with `error` set
+     */
+    virtual std::string deviceFeatures(std::string &error) { error = "not supported"; return ""; }
+
+    /**
+     * @brief deviceApplySettings - changes the Trezor settings whose "set" flag is true; the user
+     *        confirms each one on the device. `homescreen` is a JPEG of the homescreen size
+     *        ("" restores the default image). autoLockMs and haptic are ignored when < 0.
+     * @return false with `error` set on failure (cancelled on the device, invalid value...)
+     */
+    virtual bool deviceApplySettings(bool setLabel, const std::string &label, int64_t autoLockMs, int haptic,
+                                     bool setHomescreen, const std::string &homescreen, std::string &error)
+    { (void)setLabel; (void)label; (void)autoLockMs; (void)haptic; (void)setHomescreen; (void)homescreen; error = "not supported"; return false; }
+
+    /**
+     * @brief deviceSetBrightness - lets the user choose the screen brightness on the Trezor
+     */
+    virtual bool deviceSetBrightness(std::string &error) { error = "not supported"; return false; }
+
     //! cold-device protocol key image sync
     virtual uint64_t coldKeyImageSync(uint64_t &spent, uint64_t &unspent) = 0;
 

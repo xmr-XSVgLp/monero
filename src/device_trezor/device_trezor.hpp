@@ -148,6 +148,34 @@ namespace trezor {
           bool ask_on_decrypt);
 
       /**
+       * Reads the device features again (GetFeatures) and returns the ones the settings page
+       * shows as a flat JSON object: label, model, version, haptic, autoLockMs, homescreen size...
+       */
+      std::string device_features_json();
+
+      /**
+       * ApplySettings: only the given settings are changed; the user confirms each on the device.
+       * `homescreen` is a JPEG of exactly the homescreen size (empty string = default image);
+       * it is sent in chunks the device asks for (DataChunkRequest). Throws.
+       */
+      void apply_device_settings(
+          const boost::optional<std::string> & label,
+          const boost::optional<uint32_t> & auto_lock_delay_ms,
+          const boost::optional<bool> & haptic_feedback,
+          const boost::optional<std::string> & homescreen);
+
+      /**
+       * SetBrightness without a value: the user picks the brightness on the device. Throws.
+       */
+      void set_device_brightness();
+
+    protected:
+      // one settings request, answering button and homescreen chunk requests until Success
+      void settings_exchange(const google::protobuf::Message & req, const std::string & homescreen);
+
+    public:
+
+      /**
        * Get_tx_key support check
        */
       bool is_get_tx_key_supported() const override;

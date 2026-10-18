@@ -82,6 +82,10 @@ public:
     Device getDeviceType() const override;
     std::string getDeviceLabel() const override;
     std::string deviceCipherKeyValue(const std::string &key, const std::string &value, std::string &error) override;
+    std::string deviceFeatures(std::string &error) override;
+    bool deviceApplySettings(bool setLabel, const std::string &label, int64_t autoLockMs, int haptic,
+                             bool setHomescreen, const std::string &homescreen, std::string &error) override;
+    bool deviceSetBrightness(std::string &error) override;
     bool close(bool store = true);
     std::string seed(const std::string& seed_offset = "") const override;
     std::string getSeedLanguage() const override;

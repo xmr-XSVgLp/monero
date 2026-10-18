@@ -39,6 +39,8 @@ try:
 
     # Trezor-Host Protocol (Safe 7 and newer), kept locally as trezor-common predates it
     proto_srcs += [os.path.join(CWD, "..", "protob", "messages-thp.proto")]
+    # device settings (label, homescreen, brightness, haptics) with fields newer than trezor-common
+    proto_srcs += [os.path.join(CWD, "..", "protob", "messages-wplus.proto")]
     exec_args = [
         sys.executable,
         os.path.join(CWD, "pb2cpp.py"),

@@ -28,6 +28,8 @@
 //
 
 #include "device_trezor.hpp"
+#include "trezor/messages/messages-wplus.pb.h"
+#include <sstream>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 
@@ -305,6 +307,119 @@ namespace trezor {
       auto response = this->client_exchange<messages::crypto::CipheredKeyValue>(req);
       MTRACE("CipherKeyValue response received");
       return response->value();
+    }
+
+    static std::string json_escape(const std::string & s){
+      std::string out;
+      for (const char c : s){
+        switch (c){
+          case '"': out += "\\\""; break;
+          case '\\': out += "\\\\"; break;
+          case '\n': out += "\\n"; break;
+          default:
+            if (static_cast<unsigned char>(c) < 0x20) { char b[8]; snprintf(b, sizeof(b), "\\u%04x", c); out += b; }
+            else out += c;
+        }
+      }
+      return out;
+    }
+
+    // Runs one settings request, answering the button requests and homescreen chunk requests
+    // until the device says Success.
+    void device_trezor::settings_exchange(const google::protobuf::Message & req, const std::string & homescreen){
+      auto resp = call_raw(&req);
+      while (message_handler(resp)) {}
+      const auto chunk_request = static_cast<messages::MessageType>(
+          static_cast<int>(messages::wplus::WplusMessageType_DataChunkRequest));
+      while (resp.m_type == chunk_request){
+        auto * creq = dynamic_cast<const messages::wplus::DataChunkRequest *>(resp.m_msg.get());
+        CHECK_AND_ASSERT_THROW_MES(creq, "Invalid chunk request");
+        CHECK_AND_ASSERT_THROW_MES(creq->data_offset() <= homescreen.size()
+                                   && creq->data_length() <= homescreen.size() - creq->data_offset(),
+                                   "Device asked for data out of range");
+        messages::wplus::DataChunkAck ack;
+        ack.set_data_chunk(homescreen.substr(creq->data_offset(), creq->data_length()));
+        resp = call_raw(&ack);
+        while (message_handler(resp)) {}
+      }
+      if (resp.m_type == messages::MessageType_Failure) {
+        throw_failure_exception(dynamic_cast<messages::common::Failure *>(resp.m_msg.get()));
+      }
+      if (resp.m_type != messages::MessageType_Success) {
+        throw exc::UnexpectedMessageException(resp.m_type, resp.m_msg);
+      }
+    }
+
+    std::string device_trezor::device_features_json(){
+      TREZOR_AUTO_LOCK_CMD();
+      require_connected();
+
+      auto req = std::make_shared<messages::management::GetFeatures>();
+      auto features = this->client_exchange<messages::management::Features>(req);
+      m_features = features;
+
+      // newer fields (haptics, homescreen size) are unknown to the bundled proto: re-parse them
+      messages::wplus::FeaturesEx ex;
+      ex.ParseFromString(features->SerializeAsString());
+
+      std::ostringstream js;
+      js << "{\"label\":\"" << json_escape(ex.label()) << "\""
+         << ",\"model\":\"" << json_escape(ex.model()) << "\""
+         << ",\"internalModel\":\"" << json_escape(ex.internal_model()) << "\""
+         << ",\"version\":\"" << ex.major_version() << "." << ex.minor_version() << "." << ex.patch_version() << "\""
+         << ",\"autoLockMs\":" << (ex.has_auto_lock_delay_ms() ? ex.auto_lock_delay_ms() : 0)
+         << ",\"hasHaptic\":" << (ex.has_haptic_feedback() ? "true" : "false")
+         << ",\"haptic\":" << (ex.haptic_feedback() ? "true" : "false")
+         << ",\"homescreenFormat\":" << ex.homescreen_format()
+         << ",\"homescreenWidth\":" << ex.homescreen_width()
+         << ",\"homescreenHeight\":" << ex.homescreen_height()
+         << "}";
+      return js.str();
+    }
+
+    void device_trezor::apply_device_settings(
+        const boost::optional<std::string> & label,
+        const boost::optional<uint32_t> & auto_lock_delay_ms,
+        const boost::optional<bool> & haptic_feedback,
+        const boost::optional<std::string> & homescreen){
+      TREZOR_AUTO_LOCK_CMD();
+      require_connected();
+      device_state_initialize_unsafe();
+      require_initialized();
+
+      // one ApplySettings per setting: the firmware confirms them one after another anyway, and a
+      // cancel on the device then only drops that one
+      if (label) {
+        messages::wplus::ApplySettings req;
+        req.set_label(label.get());
+        settings_exchange(req, "");
+      }
+      if (auto_lock_delay_ms) {
+        messages::wplus::ApplySettings req;
+        req.set_auto_lock_delay_ms(auto_lock_delay_ms.get());
+        settings_exchange(req, "");
+      }
+      if (haptic_feedback) {
+        messages::wplus::ApplySettings req;
+        req.set_haptic_feedback(haptic_feedback.get());
+        settings_exchange(req, "");
+      }
+      if (homescreen) {
+        messages::wplus::ApplySettings req;
+        req.set_homescreen_length(static_cast<uint32_t>(homescreen.get().size()));
+        settings_exchange(req, homescreen.get());
+      }
+      MTRACE("Device settings applied");
+    }
+
+    void device_trezor::set_device_brightness(){
+      TREZOR_AUTO_LOCK_CMD();
+      require_connected();
+      device_state_initialize_unsafe();
+      require_initialized();
+
+      messages::wplus::SetBrightness req;
+      settings_exchange(req, "");
     }
 
     bool device_trezor::is_get_tx_key_supported() const

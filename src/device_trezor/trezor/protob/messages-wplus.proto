@@ -1,0 +1,72 @@
+// Device settings messages used by XMR Wallet+ (Wallet+ > Trezor page), adapted from
+// trezor-firmware common/protob/messages-management.proto (trezor-firmware 13d2f263, 2026-10-12).
+// The bundled trezor-common predates them: ApplySettings and Features are redeclared here with
+// the newer fields; they keep the wire ids of the originals (25 and 17).
+syntax = "proto2";
+package hw.trezor.messages.wplus;
+
+/**
+ * Wire ids missing from the bundled messages.proto
+ */
+enum WplusMessageType {
+    WplusMessageType_DataChunkRequest = 991;
+    WplusMessageType_DataChunkAck = 992;
+    WplusMessageType_SetBrightness = 993;
+}
+
+/**
+ * Request: change some property of the device (same wire id as management.ApplySettings)
+ * @start
+ * @next Success
+ * @next Failure
+ * @next DataChunkRequest
+ */
+message ApplySettings {
+    optional string label = 2;
+    optional bytes homescreen = 4;
+    optional uint32 auto_lock_delay_ms = 6;
+    optional bool haptic_feedback = 13;
+    optional uint32 homescreen_length = 14;  // byte length of new homescreen, device will request chunks
+}
+
+/**
+ * Response: Device asks for more data from the homescreen image
+ */
+message DataChunkRequest {
+    required uint32 data_length = 1;
+    required uint32 data_offset = 2;
+}
+
+/**
+ * Request: homescreen payload data
+ */
+message DataChunkAck {
+    required bytes data_chunk = 1;
+}
+
+/**
+ * Request: set device brightness (without value the user chooses it on the device)
+ */
+message SetBrightness {
+    optional uint32 value = 1;
+}
+
+/**
+ * Newer fields of management.Features, read by re-parsing the original message
+ */
+message FeaturesEx {
+    optional string vendor = 1;
+    optional uint32 major_version = 2;
+    optional uint32 minor_version = 3;
+    optional uint32 patch_version = 4;
+    optional string label = 10;
+    optional bool initialized = 12;
+    optional bool unlocked = 16;
+    optional string model = 21;
+    optional uint32 auto_lock_delay_ms = 38;
+    optional uint32 homescreen_format = 42;
+    optional string internal_model = 44;
+    optional uint32 homescreen_width = 47;
+    optional uint32 homescreen_height = 48;
+    optional bool haptic_feedback = 52;
+}

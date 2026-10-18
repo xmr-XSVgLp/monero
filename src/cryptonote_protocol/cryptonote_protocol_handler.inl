@@ -237,7 +237,8 @@ namespace cryptonote
         const boost::posix_time::ptime now = boost::posix_time::microsec_clock::universal_time();
         const boost::posix_time::time_duration dt = now - context.m_last_request_time;
         const auto ms = dt.total_microseconds();
-        if (ms > IDLE_PEER_KICK_TIME || (context.m_expect_response && ms > NON_RESPONSIVE_PEER_KICK_TIME))
+        if (ms > IDLE_PEER_KICK_TIME || (context.m_expect_response && ms > (m_proxy_sync && context.m_remote_address.get_zone() == epee::net_utils::zone::public_
+            ? 120 * 1000000 : NON_RESPONSIVE_PEER_KICK_TIME)))
         {
           if (context.m_score-- >= 0)
           {
@@ -1698,7 +1699,8 @@ skip:
         const boost::posix_time::ptime now = boost::posix_time::microsec_clock::universal_time();
         const boost::posix_time::time_duration dt = now - context.m_last_request_time;
         const auto ms = dt.total_microseconds();
-        if (ms > IDLE_PEER_KICK_TIME || (context.m_expect_response && ms > NON_RESPONSIVE_PEER_KICK_TIME))
+        if (ms > IDLE_PEER_KICK_TIME || (context.m_expect_response && ms > (m_proxy_sync && context.m_remote_address.get_zone() == epee::net_utils::zone::public_
+            ? 120 * 1000000 : NON_RESPONSIVE_PEER_KICK_TIME)))
         {
           context.m_idle_peer_notification = true;
           LOG_PRINT_CCONTEXT_L2("requesting callback");
