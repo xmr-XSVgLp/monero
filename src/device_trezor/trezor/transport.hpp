@@ -140,6 +140,17 @@ namespace trezor {
   };
 
 
+  // A read that waits for a confirmation on the device can be given up from another thread
+  // (the app's Cancel button). While a read is abortable the transports poll with short
+  // timeouts and call check_read_abort() between them.
+  void set_read_abortable(bool abortable);
+  bool read_abortable();
+  void request_read_abort();
+  // Gives up abortable reads after ms milliseconds (0 = no deadline).
+  void set_read_deadline(int ms);
+  // Throws ReadAbortedException / TimeoutException when the read should stop.
+  void check_read_abort();
+
   // Base transport
   typedef std::vector<std::shared_ptr<Transport>> t_transport_vect;
 

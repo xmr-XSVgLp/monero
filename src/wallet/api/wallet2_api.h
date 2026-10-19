@@ -1480,6 +1480,8 @@ struct WalletManagerFactory
     static WalletManager * getWalletManager();
     static void setLogLevel(int level);
     static void setLogCategories(const std::string &categories);
+    //! Gives up a wait for a confirmation on a hardware wallet (the operation fails as cancelled). Thread-safe.
+    static void cancelDeviceConfirmation();
 };
 
 

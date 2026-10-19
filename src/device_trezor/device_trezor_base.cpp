@@ -579,7 +579,36 @@ namespace trezor {
       messages::common::ButtonAck ack;
       write_raw(&ack);
 
-      resp = read_raw();
+      // the app's Cancel button can give up this wait (e.g. the Trezor froze)
+      set_read_abortable(true);
+      try {
+        resp = read_raw();
+      } catch (const exc::ReadAbortedException &) {
+        MINFO("Device confirmation cancelled from the app");
+        // tell the Trezor too, so it leaves the confirmation screen and the protocol stays in step
+        try {
+          messages::management::Cancel cancel;
+          write_raw(&cancel);
+          set_read_deadline(5000);
+          for (int i = 0; i < 8; ++i) {
+            GenericMessage r = read_raw();
+            if (r.m_type == messages::MessageType_Failure || r.m_type == messages::MessageType_Success) {
+              break;
+            }
+          }
+        } catch (const std::exception & e) {
+          MWARNING("Trezor did not answer the cancel: " << e.what());
+        }
+        set_read_deadline(0);
+        set_read_abortable(false);
+        m_last_msg_type = messages::MessageType_Failure;
+        on_button_pressed();
+        throw exc::proto::CancelledException();
+      } catch (...) {
+        set_read_abortable(false);
+        throw;
+      }
+      set_read_abortable(false);
     }
 
     void device_trezor_base::on_button_pressed()

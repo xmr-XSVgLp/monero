@@ -112,6 +112,12 @@ namespace exc {
     TimeoutException(): CommunicationException("Trezor communication timeout"){}
   };
 
+  class ReadAbortedException: public CommunicationException {
+  public:
+    using CommunicationException::CommunicationException;
+    ReadAbortedException(): CommunicationException("Trezor read aborted"){}
+  };
+
   class ProtocolException: public CommunicationException {
   public:
     using CommunicationException::CommunicationException;

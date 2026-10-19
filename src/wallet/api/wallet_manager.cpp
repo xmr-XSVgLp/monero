@@ -37,6 +37,7 @@
 #include "common/updates.h"
 #include "version.h"
 #include "net/http_client.h"
+#include "device_trezor/device_trezor.hpp"
 #include <boost/filesystem.hpp>
 #include <boost/regex.hpp>
 
@@ -406,6 +407,13 @@ void WalletManagerFactory::setLogLevel(int level)
 void WalletManagerFactory::setLogCategories(const std::string &categories)
 {
     mlog_set_log(categories.c_str());
+}
+
+void WalletManagerFactory::cancelDeviceConfirmation()
+{
+#ifdef WITH_DEVICE_TREZOR
+    hw::trezor::request_read_abort();
+#endif
 }
 
 

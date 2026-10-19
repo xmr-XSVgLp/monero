@@ -32,6 +32,8 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <functional>
 #include <boost/endian/conversion.hpp>
 #include <boost/asio/ip/udp.hpp>
@@ -295,6 +297,43 @@ namespace trezor{
   static void assert_port_number(uint32_t port)
   {
     CHECK_AND_ASSERT_THROW_MES(port >= 1024 && port < 65535, "Invalid port number: " << port);
+  }
+
+  static std::atomic<bool> s_read_abortable(false);
+  static std::atomic<bool> s_read_abort(false);
+  static std::atomic<int64_t> s_read_deadline_ms(0);
+
+  static int64_t steady_ms(){
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  }
+
+  void set_read_abortable(bool abortable){
+    s_read_abort = false;
+    s_read_abortable = abortable;
+  }
+
+  bool read_abortable(){
+    return s_read_abortable;
+  }
+
+  void request_read_abort(){
+    if (s_read_abortable){
+      s_read_abort = true;
+    }
+  }
+
+  void set_read_deadline(int ms){
+    s_read_deadline_ms = ms > 0 ? steady_ms() + ms : 0;
+  }
+
+  void check_read_abort(){
+    if (s_read_abortable && s_read_abort.exchange(false)){
+      throw exc::ReadAbortedException();
+    }
+    const int64_t deadline = s_read_deadline_ms;
+    if (deadline && steady_ms() > deadline){
+      throw exc::TimeoutException();
+    }
   }
 
   Transport::Transport(): m_open_counter(0) {
@@ -701,8 +740,12 @@ namespace trezor{
     while(true) {
       try {
         boost::system::error_code ec;
-        len = receive(buff, size, &ec, true);
+        const bool abortable = read_abortable();
+        len = receive(buff, size, &ec, true, abortable ? boost::posix_time::time_duration(boost::posix_time::milliseconds(250)) : boost::posix_time::time_duration(boost::posix_time::seconds(10)));
         if (ec == boost::asio::error::operation_aborted) {
+          if (abortable) {
+            check_read_abort();
+          }
           continue;
         } else if (ec) {
           throw exc::CommunicationException(std::string("Comm error: ") + ec.message());
@@ -1162,7 +1205,17 @@ namespace trezor{
     endpoint = (endpoint & ~LIBUSB_ENDPOINT_DIR_MASK) | LIBUSB_ENDPOINT_IN;
 
     int transferred = 0;
-    int r = libusb_interrupt_transfer(m_usb_device_handle, endpoint, (unsigned char*)buff, (int)size, &transferred, 0);
+    int r = 0;
+    while (true){
+      // short timeouts only while waiting for a confirmation, so the app can cancel that wait
+      const bool abortable = read_abortable();
+      r = libusb_interrupt_transfer(m_usb_device_handle, endpoint, (unsigned char*)buff, (int)size, &transferred, abortable ? 250 : 0);
+      if (abortable && r == LIBUSB_ERROR_TIMEOUT && transferred == 0){
+        check_read_abort();
+        continue;
+      }
+      break;
+    }
     CHECK_AND_ASSERT_THROW_MES(r == 0, "Unable to transfer, r: " << r);
     if (transferred != (int)size){
       throw exc::CommunicationException("Could not read the chunk");
@@ -1284,8 +1337,17 @@ namespace trezor{
     }
     size_t n = 0;
     try {
-      // THP waits here while the user confirms on the device, so no timeout
-      n = m_conn->read(buff, size, -1);
+      // THP waits here while the user confirms on the device, so no timeout; while that wait is
+      // abortable it polls so the app can cancel it
+      while (true){
+        const bool abortable = read_abortable();
+        n = m_conn->read(buff, size, abortable ? 250 : -1);
+        if (abortable && n == 0){
+          check_read_abort();
+          continue;
+        }
+        break;
+      }
     } catch (const std::runtime_error & e){
       throw exc::CommunicationException(e.what());
     }
