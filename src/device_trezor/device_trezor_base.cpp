@@ -123,8 +123,10 @@ namespace trezor {
     static std::string s_last_device_path;
 
     bool device_trezor_base::connect() {
-      // a wallet created as "Trezor:<path>" asks for that Trezor, otherwise the one the user picked
-      return connect_path(!this->name.empty() ? this->name : get_preferred_path());
+      // An explicit user choice overrides a transport saved in the wallet (USB/BLE can change).
+      // Without a GUI preference, retain the wallet/CLI device specification.
+      const auto preferred = get_preferred_path();
+      return connect_path(!preferred.empty() ? preferred : this->name);
     }
 
     bool device_trezor_base::connect_path(const std::string & spec) {
