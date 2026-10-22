@@ -29,6 +29,7 @@
 
 #include "device_trezor_base.hpp"
 #include "memwipe.h"
+#include "hex.h"
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/predicate.hpp>
@@ -52,6 +53,8 @@ namespace trezor {
                                               m_always_use_empty_passphrase(false),
                                               m_seen_passphrase_entry_message(false),
                                               m_thp_session_ready(false),
+                                              m_thp_gen(0),
+                                              m_thp_cur_gen(0),
                                               m_thp_app_name("Monero") {
 #ifdef WITH_TREZOR_DEBUGGING
       m_debug = false;
@@ -114,7 +117,17 @@ namespace trezor {
       }
     }
 
+    // What is known of each Trezor connected since the app started, by transport path
+    static std::mutex s_known_devices_mutex;
+    static std::map<std::string, device_trezor_base::device_info> s_known_devices;
+    static std::string s_last_device_path;
+
     bool device_trezor_base::connect() {
+      // a wallet created as "Trezor:<path>" asks for that Trezor, otherwise the one the user picked
+      return connect_path(!this->name.empty() ? this->name : get_preferred_path());
+    }
+
+    bool device_trezor_base::connect_path(const std::string & spec) {
       disconnect();
 
       // Enumerate all available devices
@@ -123,7 +136,7 @@ namespace trezor {
         hw::trezor::t_transport_vect trans;
 
         MDEBUG("Enumerating Trezor devices...");
-        enumerate(trans);
+        enumerate(trans, boost::starts_with(spec, "ble:"));
         sort_transports_by_env(trans);
 
         MDEBUG("Enumeration yielded " << trans.size() << " Trezor devices");
@@ -133,7 +146,7 @@ namespace trezor {
 
         for (auto &cur : trans) {
           std::string cur_path = cur->get_path();
-          if (boost::starts_with(cur_path, this->name)) {
+          if (boost::starts_with(cur_path, spec)) {
             MDEBUG("Device Match: " << cur_path);
             m_transport = cur;
             break;
@@ -141,11 +154,38 @@ namespace trezor {
         }
 
         if (!m_transport) {
-          MERROR("No matching Trezor device found. Device specifier: \"" + this->name + "\"");
+          MERROR("No matching Trezor device found. Device specifier: \"" + spec + "\"");
           return false;
         }
 
-        m_transport->open();
+        try {
+          m_transport->open();
+        } catch (const std::exception & e) {
+          // the Bluetooth Trezor seen before went away: look for Trezors again with a real scan
+          if (!boost::starts_with(m_transport->get_path(), "ble:"))
+            throw;
+          MDEBUG("Known Bluetooth Trezor did not answer, scanning again: " << e.what());
+          forget_ble_device();
+          m_transport = nullptr;
+          trans.clear();
+          enumerate(trans, true);
+          sort_transports_by_env(trans);
+          for (auto &cur : trans) {
+            if (boost::starts_with(cur->get_path(), spec)) {
+              m_transport = cur;
+              break;
+            }
+          }
+          if (!m_transport) {
+            MERROR("No matching Trezor device found. Device specifier: \"" + spec + "\"");
+            return false;
+          }
+          m_transport->open();
+        }
+        {
+          std::lock_guard<std::mutex> lock(s_known_devices_mutex);
+          s_last_device_path = m_transport->get_path();
+        }
 
         // Bridge transport has no raw protocol access, THP needs direct USB/UDP/Bluetooth
         if (m_transport->get_protocol() && (m_transport->requires_thp() || is_thp_device(*m_transport))) {
@@ -173,7 +213,14 @@ namespace trezor {
       m_always_use_empty_passphrase = false;
       m_thp_session_ready = false;
       if (m_thp){
-        m_thp->close();
+        // keep an open channel: a wallet parked in the background may come back to its session on it
+        if (m_thp->is_connected() && m_transport){
+          auto & kept = m_thp_kept[m_transport->get_path()];
+          if (kept.first && kept.first != m_thp) kept.first->close();
+          kept = std::make_pair(m_thp, m_thp_cur_gen);
+        } else {
+          m_thp->close();
+        }
         m_thp = nullptr;
       }
 
@@ -315,7 +362,15 @@ namespace trezor {
         case messages::MessageType_PassphraseRequest:
           on_passphrase_request(input, dynamic_cast<const messages::common::PassphraseRequest*>(input.m_msg.get()));
           return true;
+        // Required for firmware using the legacy passphrase-state protocol.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
         case messages::MessageType_Deprecated_PassphraseStateRequest:
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
           on_passphrase_state_request(input, dynamic_cast<const messages::common::Deprecated_PassphraseStateRequest*>(input.m_msg.get()));
           return true;
         case messages::MessageType_PinMatrixRequest:
@@ -401,6 +456,7 @@ namespace trezor {
           throw;
         }
         m_thp->set_session_id(wallet_session);
+        remember_device_unsafe();
         if (!m_thp_session_ready){
           thp_create_session();
         }
@@ -423,6 +479,41 @@ namespace trezor {
       } else {
         m_device_session_id.clear();
       }
+      remember_device_unsafe();
+    }
+
+    void device_trezor_base::remember_device_unsafe()
+    {
+      if (!m_transport || !m_features)
+        return;
+      device_info info;
+      info.path = m_transport->get_path();
+      info.name = m_transport->get_display_name();
+      info.label = m_features->has_label() ? m_features->label() : "";
+      info.model = m_features->has_model() ? m_features->model() : "";
+      info.last_used = false;
+      std::lock_guard<std::mutex> lock(s_known_devices_mutex);
+      s_known_devices[info.path] = info;
+    }
+
+    std::vector<device_trezor_base::device_info> device_trezor_base::list_devices(bool bluetooth)
+    {
+      hw::trezor::t_transport_vect trans;
+      enumerate(trans, bluetooth);
+      std::vector<device_info> res;
+      std::lock_guard<std::mutex> lock(s_known_devices_mutex);
+      for (const auto & t : trans){
+        device_info info;
+        const auto known = s_known_devices.find(t->get_path());
+        if (known != s_known_devices.end())
+          info = known->second;
+        info.path = t->get_path();
+        if (!t->get_display_name().empty())
+          info.name = t->get_display_name();
+        info.last_used = info.path == s_last_device_path;
+        res.push_back(info);
+      }
+      return res;
     }
 
     void device_trezor_base::device_state_reset()
@@ -442,6 +533,32 @@ namespace trezor {
     void device_trezor_base::thp_connect()
     {
       require_connected();
+      // reuse the channel kept from the last connection to this Trezor, so the sessions on it stay valid
+      const auto kept = m_thp_kept.find(m_transport->get_path());
+      if (kept != m_thp_kept.end()){
+        const auto channel = kept->second;
+        m_thp_kept.erase(kept);
+        if (!m_thp && channel.first && channel.first->is_connected()){
+          m_thp = channel.first;
+          m_thp_cur_gen = channel.second;
+          m_transport->set_protocol(m_thp);
+          m_thp->set_session_id(0);
+          m_thp_session_ready = false;
+          try {
+            m_features = this->client_exchange<messages::management::Features>(std::make_shared<messages::management::GetFeatures>());
+            remember_device_unsafe();
+            MDEBUG("THP: reusing channel " << m_thp->channel_id());
+            return;
+          } catch (const std::exception & e) {
+            MDEBUG("THP: kept channel is gone, opening a new one: " << e.what());
+            m_thp->close();
+            m_thp = nullptr;
+          }
+        } else if (channel.first && channel.first != m_thp){
+          channel.first->close();
+        }
+      }
+      m_thp_cur_gen = ++m_thp_gen;
       if (!m_thp){
         m_thp = std::make_shared<ProtocolThp>();
         m_transport->set_protocol(m_thp);
@@ -473,6 +590,70 @@ namespace trezor {
       }
 
       m_thp->connect(*m_transport, callbacks, store, host_name, m_thp_app_name);
+    }
+
+    std::string device_trezor_base::session_handle()
+    {
+      TREZOR_AUTO_LOCK_DEVICE();
+      if (m_thp){
+        if (!m_thp_session_ready || !m_thp->is_connected())
+          return "";
+        return "thp:" + std::to_string(m_thp_cur_gen) + ":" + std::to_string(m_thp->session_id()) + "|" + (m_transport ? m_transport->get_path() : "");
+      }
+      if (m_device_session_id.empty())
+        return "";
+      return "v1:" + epee::to_hex::string({reinterpret_cast<const uint8_t*>(m_device_session_id.data()), m_device_session_id.size()})
+          + "|" + (m_transport ? m_transport->get_path() : "");
+    }
+
+    bool device_trezor_base::resume_session(const std::string & handle)
+    {
+      TREZOR_AUTO_LOCK_DEVICE();
+      try {
+        // "<kind>:<session>|<transport path>"
+        const auto bar = handle.find('|');
+        const std::string session = handle.substr(0, bar);
+        const std::string path = bar == std::string::npos ? "" : handle.substr(bar + 1);
+
+        // the session lives on the Trezor this wallet used, which is not always the one connected now
+        if (!path.empty() && (!m_transport || m_transport->get_path() != path)){
+          if (this->name.empty())
+            set_preferred_path(path);
+          if (!connect_path(path))
+            return false;
+        } else if (!m_transport && !connect()){
+          return false;
+        }
+
+        if (boost::starts_with(session, "thp:")){
+          std::vector<std::string> parts;
+          boost::split(parts, session, boost::is_any_of(":"));
+          if (parts.size() != 3)
+            return false;
+          const unsigned long gen = std::stoul(parts[1]);
+          const unsigned long sid = std::stoul(parts[2]);
+          if (sid == 0 || sid > 0xff)
+            return false;
+          if (!m_thp || !m_thp->is_connected() || gen != m_thp_cur_gen)
+            return false;
+          m_thp->set_session_id(static_cast<uint8_t>(sid));
+          m_thp_session_ready = true;
+          MDEBUG("THP: resumed wallet session " << sid);
+          return true;
+        }
+        if (boost::starts_with(session, "v1:")){
+          std::string sid;
+          if (!epee::from_hex::to_string(sid, boost::string_ref(session).substr(3)))
+            return false;
+          if (m_thp)
+            return false;
+          m_device_session_id = epee::wipeable_string(sid);
+          return true;
+        }
+      } catch (const std::exception & e) {
+        MERROR("Could not resume the device session: " << e.what());
+      }
+      return false;
     }
 
     boost::optional<epee::wipeable_string> device_trezor_base::resolve_passphrase(bool & on_device)
@@ -646,6 +827,11 @@ namespace trezor {
       CHECK_AND_ASSERT_THROW_MES(msg, "Empty message");
       MDEBUG("on_passhprase_request");
 
+      // Deprecated wire fields must remain readable for older Trezor firmware.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
       // Backward compatibility, migration clause.
       if (msg->has__on_device() && msg->_on_device()){
         messages::common::PassphraseAck m;
@@ -658,6 +844,10 @@ namespace trezor {
       if (msg->has__on_device() && !msg->_on_device()){
         on_device = false;  // do not enter on device, old devices.
       }
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
       if (on_device && m_features && m_features->capabilities_size() > 0){
         on_device = false;

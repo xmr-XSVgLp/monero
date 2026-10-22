@@ -61,7 +61,7 @@ namespace net
     scheme_and_authority::scheme_and_authority(boost::string_ref uri)
       : scheme(), authority()
     {
-        static_assert(std::is_same<std::string::size_type, boost::string_ref::size_type>());
+        static_assert(std::is_same<std::string::size_type, boost::string_ref::size_type>(), "Required type or buffer size invariant");
 
         // Stop at scheme end or path begin. URN not supported
         const auto split = uri.find_first_of(":/");
@@ -78,7 +78,7 @@ namespace net
     userinfo_and_hostport::userinfo_and_hostport(boost::string_ref authority)
       : userinfo(), hostport()
     {
-        static_assert(std::is_same<std::string::size_type, boost::string_ref::size_type>());
+        static_assert(std::is_same<std::string::size_type, boost::string_ref::size_type>(), "Required type or buffer size invariant");
 
         const auto split = authority.find('@');
         if (split != boost::string_ref::npos)
@@ -92,7 +92,7 @@ namespace net
 
     boost::optional<user_and_pass> user_and_pass::get(boost::string_ref userinfo)
     {
-        static_assert(std::is_same<std::string::size_type, boost::string_ref::size_type>());
+        static_assert(std::is_same<std::string::size_type, boost::string_ref::size_type>(), "Required type or buffer size invariant");
         boost::optional<user_and_pass> out = user_and_pass{};
 
         const auto split = userinfo.find(':');

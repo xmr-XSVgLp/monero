@@ -81,6 +81,8 @@ public:
                            const std::string &device_name);
     Device getDeviceType() const override;
     std::string getDeviceLabel() const override;
+    std::string deviceSessionHandle() const override;
+    bool resumeDeviceSession(const std::string &handle) override;
     std::string deviceCipherKeyValue(const std::string &key, const std::string &value, std::string &error) override;
     std::string deviceFeatures(std::string &error) override;
     bool deviceApplySettings(bool setLabel, const std::string &label, int64_t autoLockMs, int haptic,
@@ -148,6 +150,12 @@ public:
     void addSubaddress(uint32_t accountIndex, const std::string& label) override;
     std::string getSubaddressLabel(uint32_t accountIndex, uint32_t addressIndex) const override;
     void setSubaddressLabel(uint32_t accountIndex, uint32_t addressIndex, const std::string &label) override;
+    void createOneOffSubaddress(uint32_t accountIndex, uint32_t addressIndex) override;
+    size_t trimUnusedSubaddressAccounts(size_t keep) override;
+    uint64_t subaddressBalance(uint32_t accountIndex, uint32_t addressIndex, bool unlocked) const override;
+    std::vector<uint32_t> subaddressesWithBalance(uint32_t accountIndex) const override;
+    bool subaddressUsed(uint32_t accountIndex, uint32_t addressIndex) const override;
+    void setChangeSubaddress(int accountIndex, int addressIndex) override;
 
     MultisigState multisig() const override;
     std::string getMultisigInfo() const override;

@@ -34,6 +34,9 @@
 #include <cstddef>
 #include <string>
 #include <type_traits>
+#include <map>
+#include <mutex>
+#include <vector>
 #include "device/device.hpp"
 #include "device/device_default.hpp"
 #include "device/device_cold.hpp"
@@ -110,6 +113,15 @@ namespace trezor {
       std::shared_ptr<ProtocolThp> m_thp;
       bool m_thp_session_ready;
       std::string m_thp_app_name;
+      // THP channels survive a disconnect (one per Trezor, by transport path) so that wallets of the same Trezor
+      // (each with its own session and passphrase) can come back to their session; m_thp_gen counts new channels
+      // and m_thp_cur_gen is the number of the channel in use
+      std::map<std::string, std::pair<std::shared_ptr<ProtocolThp>, uint32_t>> m_thp_kept;
+      uint32_t m_thp_gen;
+      uint32_t m_thp_cur_gen;
+
+      bool connect_path(const std::string & spec);
+      void remember_device_unsafe();
 
 #ifdef WITH_TREZOR_DEBUGGING
       std::shared_ptr<trezor_debug_callback> m_debug_callback;
@@ -158,7 +170,7 @@ namespace trezor {
                       bool open_session = false)
       {
         // Require strictly protocol buffers response in the template.
-        static_assert(std::is_base_of<google::protobuf::Message, t_message>::value);
+        static_assert(std::is_base_of<google::protobuf::Message, t_message>::value, "Required type or buffer size invariant");
         const bool accepting_base = boost::is_same<google::protobuf::Message, t_message>::value;
         if (resp_types && !accepting_base){
           throw std::invalid_argument("Cannot specify list of accepted types and not using generic response");
@@ -329,6 +341,29 @@ namespace trezor {
      */
     void set_thp_app_name(const std::string & name) { m_thp_app_name = name; }
     bool is_thp() const { return static_cast<bool>(m_thp); }
+
+    /**
+     * Trezors found on the computer, with what is known of them from earlier connections.
+     */
+    struct device_info {
+      std::string path;   // transport path, e.g. webusb:001:4 or ble:<id>
+      std::string name;   // name announced over Bluetooth
+      std::string label;  // device label, when it was connected before
+      std::string model;
+      bool last_used;     // the Trezor connected last
+    };
+    static std::vector<device_info> list_devices(bool bluetooth);
+
+    /**
+     * Handle of the session the device is serving now (it holds the passphrase on the device), "" if none.
+     */
+    std::string session_handle();
+
+    /**
+     * Switches back to a session from session_handle(), after another wallet of the same Trezor used its own.
+     * Returns false when that session is gone (the next call then opens a new one and asks for the passphrase).
+     */
+    bool resume_session(const std::string & handle);
 
     // Protocol callbacks
     void on_button_request(GenericMessage & resp, const messages::common::ButtonRequest * msg);

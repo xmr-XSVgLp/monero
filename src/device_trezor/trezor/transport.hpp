@@ -151,6 +151,12 @@ namespace trezor {
   // Throws ReadAbortedException / TimeoutException when the read should stop.
   void check_read_abort();
 
+  // The Trezor the user picked when several are connected (a transport path, "" = the first one found).
+  void set_preferred_path(const std::string & path);
+  std::string get_preferred_path();
+  // Forgets the Bluetooth Trezor seen last, so the next enumeration scans again (it went away)
+  void forget_ble_device();
+
   // Base transport
   typedef std::vector<std::shared_ptr<Transport>> t_transport_vect;
 
@@ -161,6 +167,8 @@ namespace trezor {
 
     virtual bool ping() { return false; };
     virtual std::string get_path() const { return ""; };
+    // A name the device announces itself with (Bluetooth), "" when there is none
+    virtual std::string get_display_name() const { return ""; };
     virtual void enumerate(t_transport_vect & res){};
     virtual void open(){};
     virtual void close(){};
@@ -359,6 +367,7 @@ namespace trezor {
 
     size_t packet_size() const override { return 244; }
     bool requires_thp() const override { return true; }
+    std::string get_display_name() const override { return m_name; }
 
     std::ostream& dump(std::ostream& o) const override;
 
@@ -375,9 +384,10 @@ namespace trezor {
   //
 
   /**
-   * Enumerates all transports
+   * Enumerates all transports. Bluetooth is scanned only when no Trezor is connected by cable,
+   * unless force_ble is set.
    */
-  void enumerate(t_transport_vect & res);
+  void enumerate(t_transport_vect & res, bool force_ble = false);
 
   /**
    * Sorts found transports by TREZOR_PATH environment variable.
@@ -451,7 +461,7 @@ namespace trezor {
                        boost::optional<messages::MessageType> resp_type = boost::none)
   {
     // Require strictly protocol buffers response in the template.
-    static_assert(std::is_base_of<google::protobuf::Message, t_message>::value);
+    static_assert(std::is_base_of<google::protobuf::Message, t_message>::value, "Required type or buffer size invariant");
 
     // Write the request
     transport.write(req);

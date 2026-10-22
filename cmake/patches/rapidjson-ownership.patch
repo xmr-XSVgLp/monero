@@ -1,0 +1,65 @@
+diff --git a/include/rapidjson/document.h b/include/rapidjson/document.h
+index d25c5c0a..28f4699f 100644
+--- a/include/rapidjson/document.h
++++ b/include/rapidjson/document.h
+@@ -2032,12 +2032,11 @@ private:
+         if (count) {
+             GenericValue* e = static_cast<GenericValue*>(allocator.Malloc(count * sizeof(GenericValue)));
+             SetElementsPointer(e);
+-RAPIDJSON_DIAG_PUSH
+-#if defined(__GNUC__) && __GNUC__ >= 8
+-RAPIDJSON_DIAG_OFF(class-memaccess) // ignore complains from gcc that no trivial copy constructor exists.
+-#endif
+-            std::memcpy(e, values, count * sizeof(GenericValue));
+-RAPIDJSON_DIAG_POP
++            // Transfer ownership into constructed objects, including nested values.
++            for (SizeType i = 0; i < count; ++i) {
++                new (&e[i]) GenericValue();
++                e[i].RawAssign(values[i]);
++            }
+         }
+         else
+             SetElementsPointer(0);
+@@ -2050,12 +2049,12 @@ RAPIDJSON_DIAG_POP
+         if (count) {
+             Member* m = static_cast<Member*>(allocator.Malloc(count * sizeof(Member)));
+             SetMembersPointer(m);
+-RAPIDJSON_DIAG_PUSH
+-#if defined(__GNUC__) && __GNUC__ >= 8
+-RAPIDJSON_DIAG_OFF(class-memaccess) // ignore complains from gcc that no trivial copy constructor exists.
+-#endif
+-            std::memcpy(m, members, count * sizeof(Member));
+-RAPIDJSON_DIAG_POP
++            // Transfer ownership into constructed objects, including nested values.
++            for (SizeType i = 0; i < count; ++i) {
++                new (&m[i]) Member();
++                m[i].name.RawAssign(members[i].name);
++                m[i].value.RawAssign(members[i].value);
++            }
+         }
+         else
+             SetMembersPointer(0);
+diff --git a/include/rapidjson/internal/stack.h b/include/rapidjson/internal/stack.h
+index 89558d0d..86e9362e 100644
+--- a/include/rapidjson/internal/stack.h
++++ b/include/rapidjson/internal/stack.h
+@@ -114,7 +114,7 @@ public:
+     template<typename T>
+     RAPIDJSON_FORCEINLINE void Reserve(size_t count = 1) {
+          // Expand the stack if needed
+-        if (RAPIDJSON_UNLIKELY(stackTop_ + sizeof(T) * count > stackEnd_))
++        if (RAPIDJSON_UNLIKELY(!stack_ || count > static_cast<size_t>(stackEnd_ - stackTop_) / sizeof(T)))
+             Expand<T>(count);
+     }
+ 
+@@ -174,8 +174,8 @@ public:
+     }
+ 
+     bool Empty() const { return stackTop_ == stack_; }
+-    size_t GetSize() const { return static_cast<size_t>(stackTop_ - stack_); }
+-    size_t GetCapacity() const { return static_cast<size_t>(stackEnd_ - stack_); }
++    size_t GetSize() const { return stack_ ? static_cast<size_t>(stackTop_ - stack_) : 0; }
++    size_t GetCapacity() const { return stack_ ? static_cast<size_t>(stackEnd_ - stack_) : 0; }
+ 
+ private:
+     template<typename T>

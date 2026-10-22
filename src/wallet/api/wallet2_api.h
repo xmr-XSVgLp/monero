@@ -805,6 +805,40 @@ struct Wallet
     virtual void setSubaddressLabel(uint32_t accountIndex, uint32_t addressIndex, const std::string &label) = 0;
 
     /**
+     * @brief createOneOffSubaddress - watches one subaddress for incoming funds without creating the ones
+     *                                 before it (wallet2::create_one_off_subaddress, simplewallet "address one-off")
+     */
+    virtual void createOneOffSubaddress(uint32_t accountIndex, uint32_t addressIndex) = 0;
+
+    /**
+     * @brief trimUnusedSubaddressAccounts - removes the trailing accounts that never received or sent
+     *                                       anything, keeping at least `keep`; returns how many were removed
+     */
+    virtual size_t trimUnusedSubaddressAccounts(size_t keep) = 0;
+
+    /**
+     * @brief subaddressBalance - balance (or unlocked balance) received at one subaddress; works for any index
+     *                            the wallet watches, also when its account does not exist (one-off subaddress)
+     */
+    virtual uint64_t subaddressBalance(uint32_t accountIndex, uint32_t addressIndex, bool unlocked) const = 0;
+
+    /**
+     * @brief subaddressesWithBalance - address indexes of an account that hold funds (any watched index)
+     */
+    virtual std::vector<uint32_t> subaddressesWithBalance(uint32_t accountIndex) const = 0;
+
+    /**
+     * @brief subaddressUsed - true if the subaddress ever received something (confirmed or in the pool)
+     */
+    virtual bool subaddressUsed(uint32_t accountIndex, uint32_t addressIndex) const = 0;
+
+    /**
+     * @brief setChangeSubaddress - change of the next transactions goes to (accountIndex, addressIndex);
+     *                              a negative index restores the default (address 0 of the spending account)
+     */
+    virtual void setChangeSubaddress(int accountIndex, int addressIndex) = 0;
+
+    /**
      * @brief multisig - returns current state of multisig wallet creation process
      * @return MultisigState struct
      */
@@ -1161,6 +1195,11 @@ struct Wallet
      */
     virtual std::string getDeviceLabel() const { return ""; }
 
+    //! Handle of this wallet's session on its hardware wallet ("" if none); the session keeps the device passphrase
+    virtual std::string deviceSessionHandle() const { return ""; }
+    //! Makes the hardware wallet serve this wallet again, back on the session from deviceSessionHandle()
+    virtual bool resumeDeviceSession(const std::string &handle) { (void)handle; return false; }
+
     /**
      * @brief deviceCipherKeyValue - SLIP-11 CipherKeyValue on the Trezor (path m/10016'/0'):
      *        encrypts `value` (a multiple of 16 bytes) with a key derived on the device from its
@@ -1482,6 +1521,19 @@ struct WalletManagerFactory
     static void setLogCategories(const std::string &categories);
     //! Gives up a wait for a confirmation on a hardware wallet (the operation fails as cancelled). Thread-safe.
     static void cancelDeviceConfirmation();
+
+    //! A Trezor found on the computer
+    struct TrezorDevice {
+        std::string path;   //!< transport path, e.g. webusb:001:4
+        std::string name;   //!< name announced over Bluetooth
+        std::string label;  //!< device label, known once it was connected
+        std::string model;
+        bool lastUsed;      //!< the Trezor connected last
+    };
+    //! Lists the connected Trezors (Bluetooth is scanned too when bluetooth is set, which takes a few seconds)
+    static std::vector<TrezorDevice> listTrezorDevices(bool bluetooth);
+    //! Picks the Trezor that hardware wallets connect to from now on ("" = the first one found)
+    static void setTrezorDevicePath(const std::string &path);
 };
 
 

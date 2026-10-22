@@ -48,6 +48,18 @@ message(STATUS "CMake version ${CMAKE_VERSION}")
 
 project(monero)
 
+# Apple's linker resolves archive references without repeating static libraries.
+# Let modern CMake deduplicate them while keeping the first occurrence.
+if(APPLE)
+  if(POLICY CMP0156)
+    cmake_policy(SET CMP0156 NEW)
+  endif()
+  if(POLICY CMP0179)
+    cmake_policy(SET CMP0179 NEW)
+  endif()
+endif()
+
+
 option (USE_CCACHE "Use ccache if a usable instance is found" ON)
 if (USE_CCACHE)
 	include(FindCcache) # Has to be included after the project() macro, to be able to read the CXX variable.
@@ -460,6 +472,8 @@ endif()
 #   set(NETBSD TRUE)
 # elseif(CMAKE_SYSTEM_NAME MATCHES ".*BSDI.*")
 #   set(BSDI TRUE)
+
+include(cmake/ApplyRapidJsonFixes.cmake)
 
 include_directories(external/rapidjson/include external/easylogging++ src contrib/epee/include external external/supercop/include)
 

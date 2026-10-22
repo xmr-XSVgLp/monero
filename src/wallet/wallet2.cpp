@@ -1534,6 +1534,14 @@ bool wallet2::get_multisig_seed(epee::wipeable_string& seed, const epee::wipeabl
   return true;
 }
 //----------------------------------------------------------------------------------------------------
+void wallet2::rebind_device()
+{
+  hw::device &hwdev = m_account.get_device();
+  hwdev.set_network_type(m_nettype);
+  hwdev.set_derivation_path(m_device_derivation_path);
+  hwdev.set_callback(get_device_callback());
+}
+//----------------------------------------------------------------------------------------------------
 bool wallet2::reconnect_device()
 {
   bool r = true;
@@ -1635,7 +1643,7 @@ bool wallet2::should_expand(const cryptonote::subaddress_index &index) const
 void wallet2::expand_subaddresses(const cryptonote::subaddress_index& index)
 {
   // check if index will overflow container (usually only applicable on 32-bit systems)
-  if constexpr (sizeof(std::size_t) <= sizeof(std::uint32_t))
+  if (sizeof(std::size_t) <= sizeof(std::uint32_t))
   {
     static constexpr std::uint32_t max_idx = static_cast<std::uint32_t>(std::numeric_limits<std::size_t>::max());
     const bool cannot_label_index = index.major == max_idx || index.minor == max_idx;
@@ -1695,6 +1703,41 @@ void wallet2::create_one_off_subaddress(const cryptonote::subaddress_index& inde
 {
   const crypto::public_key pkey = get_subaddress_spend_public_key(index);
   m_subaddresses[pkey] = index;
+}
+//----------------------------------------------------------------------------------------------------
+size_t wallet2::trim_unused_subaddress_accounts(size_t keep)
+{
+  // account indexes are part of each address, so only the ones after the last used account can go
+  size_t used = 1;
+  auto mark = [&used](uint32_t major) { used = std::max<size_t>(used, size_t(major) + 1); };
+  for (const auto &td : m_transfers)
+    mark(td.m_subaddr_index.major);
+  for (const auto &p : m_payments)
+    mark(p.second.m_subaddr_index.major);
+  for (const auto &p : m_unconfirmed_payments)
+    mark(p.second.m_pd.m_subaddr_index.major);
+  for (const auto &p : m_confirmed_txs)
+    if (p.second.m_subaddr_account != (uint32_t)-1)
+      mark(p.second.m_subaddr_account);
+  for (const auto &p : m_unconfirmed_txs)
+    mark(p.second.m_subaddr_account);
+
+  const size_t count = std::max(used, std::max<size_t>(keep, 1));
+  const size_t before = m_subaddress_labels.size();
+  if (count >= before)
+    return 0;
+  m_subaddress_labels.resize(count);
+  get_account_tags(); // resizes m_account_tags to the accounts left
+
+  // scanning keys: what expand_subaddresses would have made for `count` accounts (labels + lookahead)
+  const uint64_t major_end = uint64_t(count) + m_subaddress_lookahead_major;
+  for (auto it = m_subaddresses.begin(); it != m_subaddresses.end(); )
+  {
+    const cryptonote::subaddress_index &i = it->second;
+    const bool drop = i.major >= major_end || (i.major >= count && i.minor >= m_subaddress_lookahead_minor);
+    it = drop ? m_subaddresses.erase(it) : std::next(it);
+  }
+  return before - count;
 }
 //----------------------------------------------------------------------------------------------------
 std::string wallet2::get_subaddress_label(const cryptonote::subaddress_index& index) const
@@ -4146,7 +4189,6 @@ void wallet2::refresh(bool trusted_daemon, uint64_t start_height, uint64_t & blo
   uint64_t blocks_start_height;
   std::vector<cryptonote::block_complete_entry> blocks;
   std::vector<parsed_block> parsed_blocks;
-  bool refreshed = false;
   std::shared_ptr<std::map<std::pair<uint64_t, uint64_t>, size_t>> output_tracker_cache;
   hw::device &hwdev = m_account.get_device();
 
@@ -10172,7 +10214,7 @@ void wallet2::transfer_selected(const std::vector<cryptonote::tx_destination_ent
   //prepare inputs
   LOG_PRINT_L2("preparing outputs");
   typedef cryptonote::tx_source_entry::output_entry tx_output_entry;
-  size_t i = 0, out_index = 0;
+  size_t out_index = 0;
   std::vector<cryptonote::tx_source_entry> sources;
   for(size_t idx: selected_transfers)
   {
@@ -10191,7 +10233,7 @@ void wallet2::transfer_selected(const std::vector<cryptonote::tx_destination_ent
       oe.second.mask = std::get<2>(outs[out_index][n]);
 
       src.outputs.push_back(oe);
-      ++i;
+
     }
 
     //paste real transaction to the random index
@@ -10220,8 +10262,9 @@ void wallet2::transfer_selected(const std::vector<cryptonote::tx_destination_ent
   cryptonote::tx_destination_entry change_dts = AUTO_VAL_INIT(change_dts);
   if (needed_money < found_money)
   {
-    change_dts.addr = get_subaddress({subaddr_account, 0});
-    change_dts.is_subaddress = subaddr_account != 0;
+    const cryptonote::subaddress_index change_index = m_change_subaddress ? *m_change_subaddress : cryptonote::subaddress_index{subaddr_account, 0};
+    change_dts.addr = get_subaddress(change_index);
+    change_dts.is_subaddress = !change_index.is_zero();
     change_dts.amount = found_money - needed_money;
   }
 
@@ -10392,7 +10435,7 @@ void wallet2::transfer_selected_rct(std::vector<cryptonote::tx_destination_entry
 
   //prepare inputs
   LOG_PRINT_L2("preparing outputs");
-  size_t i = 0, out_index = 0;
+  size_t out_index = 0;
   std::vector<cryptonote::tx_source_entry> sources;
   for(size_t idx: selected_transfers)
   {
@@ -10415,7 +10458,7 @@ void wallet2::transfer_selected_rct(std::vector<cryptonote::tx_destination_entry
       oe.second.mask = std::get<2>(outs[out_index][n]);
       src.outputs.push_back(oe);
     }
-    ++i;
+
 
     //paste real transaction to the random index
     auto it_to_replace = std::find_if(src.outputs.begin(), src.outputs.end(), [&](const tx_output_entry& a)
@@ -10467,8 +10510,9 @@ void wallet2::transfer_selected_rct(std::vector<cryptonote::tx_destination_entry
   }
   else
   {
-    change_dts.addr = get_subaddress({subaddr_account, 0});
-    change_dts.is_subaddress = subaddr_account != 0;
+    const cryptonote::subaddress_index change_index = m_change_subaddress ? *m_change_subaddress : cryptonote::subaddress_index{subaddr_account, 0};
+    change_dts.addr = get_subaddress(change_index);
+    change_dts.is_subaddress = !change_index.is_zero();
     splitted_dsts.push_back(change_dts);
   }
 
@@ -16197,8 +16241,10 @@ std::vector<std::pair<uint64_t, uint64_t>> wallet2::estimate_backlog(const std::
   THROW_WALLET_EXCEPTION_IF(full_reward_zone == 0, error::wallet_internal_error, "Invalid block weight limit from daemon");
 
   std::vector<std::pair<uint64_t, uint64_t>> blocks;
-  for (const auto& [our_fee_byte_min, our_fee_byte_max] : fee_levels)
+  for (const auto& fee_level : fee_levels)
   {
+    const auto our_fee_byte_min = fee_level.first;
+    const auto our_fee_byte_max = fee_level.second;
     uint64_t minfee_weight = 0, maxfee_weight = 0;
     for (const auto &i: res.backlog)
     {

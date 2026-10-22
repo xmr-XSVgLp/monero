@@ -749,6 +749,37 @@ Wallet::Device WalletImpl::getDeviceType() const
     return static_cast<Wallet::Device>(m_wallet->get_device_type());
 }
 
+std::string WalletImpl::deviceSessionHandle() const
+{
+#ifdef WITH_DEVICE_TREZOR
+    try {
+        auto *trezor = dynamic_cast<hw::trezor::device_trezor_base *>(&m_wallet->get_account().get_device());
+        if (trezor)
+            return trezor->session_handle();
+    } catch (const std::exception &e) {
+        LOG_ERROR("Could not read the device session: " << e.what());
+    }
+#endif
+    return "";
+}
+
+bool WalletImpl::resumeDeviceSession(const std::string &handle)
+{
+    if (!m_wallet->key_on_device())
+        return false;
+    try {
+        m_wallet->rebind_device();
+#ifdef WITH_DEVICE_TREZOR
+        auto *trezor = dynamic_cast<hw::trezor::device_trezor_base *>(&m_wallet->get_account().get_device());
+        if (trezor && !handle.empty())
+            return trezor->resume_session(handle);
+#endif
+    } catch (const std::exception &e) {
+        LOG_ERROR("Could not resume the device session: " << e.what());
+    }
+    return false;
+}
+
 std::string WalletImpl::getDeviceLabel() const
 {
 #ifdef WITH_DEVICE_TREZOR
@@ -1199,6 +1230,48 @@ uint64_t WalletImpl::balance(uint32_t accountIndex) const
     return m_wallet->balance(accountIndex, false);
 }
 
+uint64_t WalletImpl::subaddressBalance(uint32_t accountIndex, uint32_t addressIndex, bool unlocked) const
+{
+    if (unlocked)
+    {
+        const auto per = m_wallet->unlocked_balance_per_subaddress(accountIndex, false);
+        const auto it = per.find(addressIndex);
+        return it == per.end() ? 0 : it->second.first;
+    }
+    const auto per = m_wallet->balance_per_subaddress(accountIndex, false);
+    const auto it = per.find(addressIndex);
+    return it == per.end() ? 0 : it->second;
+}
+
+std::vector<uint32_t> WalletImpl::subaddressesWithBalance(uint32_t accountIndex) const
+{
+    std::vector<uint32_t> indexes;
+    for (const auto &p : m_wallet->balance_per_subaddress(accountIndex, false))
+        if (p.second > 0)
+            indexes.push_back(p.first);
+    return indexes;
+}
+
+bool WalletImpl::subaddressUsed(uint32_t accountIndex, uint32_t addressIndex) const
+{
+    tools::wallet2::transfer_container transfers;
+    m_wallet->get_transfers(transfers);
+    for (const auto &td : transfers)
+        if (td.m_subaddr_index.major == accountIndex && td.m_subaddr_index.minor == addressIndex)
+            return true;
+    std::list<std::pair<crypto::hash, tools::wallet2::pool_payment_details>> pool;
+    m_wallet->get_unconfirmed_payments(pool, accountIndex, {addressIndex});
+    return !pool.empty();
+}
+
+void WalletImpl::setChangeSubaddress(int accountIndex, int addressIndex)
+{
+    if (accountIndex < 0 || addressIndex < 0)
+        m_wallet->set_change_subaddress(boost::none);
+    else
+        m_wallet->set_change_subaddress(cryptonote::subaddress_index{uint32_t(accountIndex), uint32_t(addressIndex)});
+}
+
 uint64_t WalletImpl::unlockedBalance(uint32_t accountIndex) const
 {
     return m_wallet->unlocked_balance(accountIndex, false);
@@ -1637,6 +1710,40 @@ std::string WalletImpl::getSubaddressLabel(uint32_t accountIndex, uint32_t addre
         return "";
     }
 }
+void WalletImpl::createOneOffSubaddress(uint32_t accountIndex, uint32_t addressIndex)
+{
+    // status() is how the caller learns the result: do not leave an older error there
+    clearStatus();
+    if (checkBackgroundSync("cannot add subaddress"))
+        return;
+    try
+    {
+        m_wallet->create_one_off_subaddress({accountIndex, addressIndex});
+    }
+    catch (const std::exception &e)
+    {
+        LOG_ERROR("Error creating one-off subaddress: " << e.what());
+        setStatusError(string(tr("Failed to create one-off subaddress: ")) + e.what());
+    }
+}
+
+size_t WalletImpl::trimUnusedSubaddressAccounts(size_t keep)
+{
+    clearStatus();
+    if (checkBackgroundSync("cannot remove accounts"))
+        return 0;
+    try
+    {
+        return m_wallet->trim_unused_subaddress_accounts(keep);
+    }
+    catch (const std::exception &e)
+    {
+        LOG_ERROR("Error removing unused accounts: " << e.what());
+        setStatusError(string(tr("Failed to remove unused accounts: ")) + e.what());
+        return 0;
+    }
+}
+
 void WalletImpl::setSubaddressLabel(uint32_t accountIndex, uint32_t addressIndex, const std::string &label)
 {
     if (checkBackgroundSync("cannot set subbaddress label"))

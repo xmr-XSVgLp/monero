@@ -215,9 +215,9 @@ namespace socks
             if (max_length < userinfo.pass.size())
                 return 0;
 
-            static_assert(max_length < std::numeric_limits<std::size_t>::max());
-            static_assert(max_length < std::numeric_limits<std::size_t>::max() - max_length);
-            static_assert(3 <= std::numeric_limits<std::size_t>::max() - max_length - max_length);
+            static_assert(max_length < std::numeric_limits<std::size_t>::max(), "Required type or buffer size invariant");
+            static_assert(max_length < std::numeric_limits<std::size_t>::max() - max_length, "Required type or buffer size invariant");
+            static_assert(3 <= std::numeric_limits<std::size_t>::max() - max_length - max_length, "Required type or buffer size invariant");
 
             if (out.size() < 3 + userinfo.user.size() + userinfo.pass.size())
                 return 0;
@@ -309,7 +309,7 @@ namespace socks
                 out.remove_prefix(length);
 
             const auto request = v5_domain_connect::make(std::uint8_t(domain.size()));
-            static_assert(sizeof(port) <= std::numeric_limits<std::size_t>::max() - sizeof(request));
+            static_assert(sizeof(port) <= std::numeric_limits<std::size_t>::max() - sizeof(request), "Required type or buffer size invariant");
             if (std::numeric_limits<std::size_t>::max() - sizeof(request) - sizeof(port) < domain.size())
                 return sizes;
 

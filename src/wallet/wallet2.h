@@ -1141,6 +1141,12 @@ private:
      */
     void expand_subaddresses(const cryptonote::subaddress_index& index);
     void create_one_off_subaddress(const cryptonote::subaddress_index& index);
+    // removes the trailing accounts that never received or sent anything (labels, tags and their scanning
+    // keys beyond the lookahead); keeps at least `keep` accounts. Returns how many were removed
+    size_t trim_unused_subaddress_accounts(size_t keep);
+    // change of the next transactions goes to this subaddress instead of address 0 of the spending account
+    // (Wallet+ mined addresses: their change goes back to 0:1); boost::none restores the default
+    void set_change_subaddress(const boost::optional<cryptonote::subaddress_index> &index) { m_change_subaddress = index; }
     std::string get_subaddress_label(const cryptonote::subaddress_index& index) const;
     void set_subaddress_label(const cryptonote::subaddress_index &index, const std::string &label);
     void set_subaddress_lookahead(size_t major, size_t minor);
@@ -1167,6 +1173,8 @@ private:
     bool key_on_device() const { return get_device_type() != hw::device::device_type::SOFTWARE; }
     hw::device::device_type get_device_type() const { return m_key_device_type; }
     bool reconnect_device();
+    // points the shared hardware device back at this wallet (callbacks, network, derivation path)
+    void rebind_device();
 
     // locked & unlocked balance of given or current subaddress account
     uint64_t balance(uint32_t subaddr_index_major, bool strict) const;
@@ -2074,6 +2082,7 @@ private:
     NodeRPCProxy m_node_rpc_proxy;
     std::unordered_set<crypto::hash> m_scanned_pool_txs[2];
     size_t m_subaddress_lookahead_major, m_subaddress_lookahead_minor;
+    boost::optional<cryptonote::subaddress_index> m_change_subaddress;  // not stored
     std::string m_device_name;
     std::string m_device_derivation_path;
     uint64_t m_device_last_key_image_sync;

@@ -416,6 +416,27 @@ void WalletManagerFactory::cancelDeviceConfirmation()
 #endif
 }
 
+std::vector<WalletManagerFactory::TrezorDevice> WalletManagerFactory::listTrezorDevices(bool bluetooth)
+{
+    std::vector<TrezorDevice> res;
+#ifdef WITH_DEVICE_TREZOR
+    try {
+        for (const auto &d : hw::trezor::device_trezor_base::list_devices(bluetooth))
+            res.push_back({d.path, d.name, d.label, d.model, d.last_used});
+    } catch (const std::exception &e) {
+        LOG_ERROR("Could not list Trezor devices: " << e.what());
+    }
+#endif
+    return res;
+}
+
+void WalletManagerFactory::setTrezorDevicePath(const std::string &path)
+{
+#ifdef WITH_DEVICE_TREZOR
+    hw::trezor::set_preferred_path(path);
+#endif
+}
+
 
 
 }

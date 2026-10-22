@@ -81,41 +81,11 @@ namespace
   };
   using openssl_pkey = std::unique_ptr<EVP_PKEY, openssl_pkey_free>;
 
-  struct openssl_rsa_free
+  struct openssl_pkey_ctx_free
   {
-    void operator()(RSA* ptr) const noexcept
-    {
-      RSA_free(ptr);
-    }
+    void operator()(EVP_PKEY_CTX* ptr) const noexcept { EVP_PKEY_CTX_free(ptr); }
   };
-  using openssl_rsa = std::unique_ptr<RSA, openssl_rsa_free>;
-
-  struct openssl_bignum_free
-  {
-    void operator()(BIGNUM* ptr) const noexcept
-    {
-      BN_free(ptr);
-    }
-  };
-  using openssl_bignum = std::unique_ptr<BIGNUM, openssl_bignum_free>;
-
-  struct openssl_ec_key_free
-  {
-    void operator()(EC_KEY* ptr) const noexcept
-    {
-      EC_KEY_free(ptr);
-    }
-  };
-  using openssl_ec_key = std::unique_ptr<EC_KEY, openssl_ec_key_free>;
-
-  struct openssl_group_free
-  {
-    void operator()(EC_GROUP* ptr) const noexcept
-    {
-      EC_GROUP_free(ptr);
-    }
-  };
-  using openssl_group = std::unique_ptr<EC_GROUP, openssl_group_free>;
+  using openssl_pkey_ctx = std::unique_ptr<EVP_PKEY_CTX, openssl_pkey_ctx_free>;
 
   boost::system::error_code load_ca_file(boost::asio::ssl::context& ctx, const std::string& path)
   {
@@ -143,44 +113,19 @@ namespace net_utils
 bool create_rsa_ssl_certificate(EVP_PKEY *&pkey, X509 *&cert)
 {
   MINFO("Generating SSL certificate");
-  pkey = EVP_PKEY_new();
-  if (!pkey)
-  {
-    MERROR("Failed to create new private key");
-    return false;
-  }
-
-  openssl_pkey pkey_deleter{pkey};
-  openssl_rsa rsa{RSA_new()};
-  if (!rsa)
-  {
-    MERROR("Error allocating RSA private key");
-    return false;
-  }
-
-  openssl_bignum exponent{BN_new()};
-  if (!exponent)
-  {
-    MERROR("Error allocating exponent");
-    return false;
-  }
-
-  BN_set_word(exponent.get(), RSA_F4);
-
-  if (RSA_generate_key_ex(rsa.get(), 4096, exponent.get(), nullptr) != 1)
+  pkey = nullptr;
+  cert = nullptr;
+  openssl_pkey_ctx ctx{EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr)};
+  if (!ctx || EVP_PKEY_keygen_init(ctx.get()) <= 0 ||
+      EVP_PKEY_CTX_set_rsa_keygen_bits(ctx.get(), 4096) <= 0 ||
+      EVP_PKEY_keygen(ctx.get(), &pkey) <= 0)
   {
     MERROR("Error generating RSA private key");
+    EVP_PKEY_free(pkey);
+    pkey = nullptr;
     return false;
   }
-
-  if (EVP_PKEY_assign_RSA(pkey, rsa.get()) <= 0)
-  {
-    MERROR("Error assigning RSA private key");
-    return false;
-  }
-
-  // the RSA key is now managed by the EVP_PKEY structure
-  (void)rsa.release();
+  openssl_pkey pkey_deleter{pkey};
 
   cert = X509_new();
   if (!cert)
@@ -212,55 +157,20 @@ bool create_rsa_ssl_certificate(EVP_PKEY *&pkey, X509 *&cert)
 bool create_ec_ssl_certificate(EVP_PKEY *&pkey, X509 *&cert, int type)
 {
   MINFO("Generating SSL certificate");
-  pkey = EVP_PKEY_new();
-  if (!pkey)
-  {
-    MERROR("Failed to create new private key");
-    return false;
-  }
-
-  openssl_pkey pkey_deleter{pkey};
-  openssl_ec_key ec_key{EC_KEY_new()};
-  if (!ec_key)
-  {
-    MERROR("Error allocating EC private key");
-    return false;
-  }
-
-  EC_GROUP *group = EC_GROUP_new_by_curve_name(type);
-  if (!group)
-  {
-    MERROR("Error getting EC group " << type);
-    return false;
-  }
-  openssl_group group_deleter{group};
-
-  EC_GROUP_set_asn1_flag(group, OPENSSL_EC_NAMED_CURVE); 
-  EC_GROUP_set_point_conversion_form(group, POINT_CONVERSION_UNCOMPRESSED);
-
-  if (!EC_GROUP_check(group, NULL))
-  {
-    MERROR("Group failed check: " << ERR_reason_error_string(ERR_get_error()));
-    return false;
-  }
-  if (EC_KEY_set_group(ec_key.get(), group) != 1)
-  {
-    MERROR("Error setting EC group");
-    return false;
-  }
-  if (EC_KEY_generate_key(ec_key.get()) != 1)
+  pkey = nullptr;
+  cert = nullptr;
+  openssl_pkey_ctx ctx{EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr)};
+  if (!ctx || EVP_PKEY_keygen_init(ctx.get()) <= 0 ||
+      EVP_PKEY_CTX_set_ec_paramgen_curve_nid(ctx.get(), type) <= 0 ||
+      EVP_PKEY_CTX_set_ec_param_enc(ctx.get(), OPENSSL_EC_NAMED_CURVE) <= 0 ||
+      EVP_PKEY_keygen(ctx.get(), &pkey) <= 0)
   {
     MERROR("Error generating EC private key");
+    EVP_PKEY_free(pkey);
+    pkey = nullptr;
     return false;
   }
-  if (EVP_PKEY_assign_EC_KEY(pkey, ec_key.get()) <= 0)
-  {
-    MERROR("Error assigning EC private key");
-    return false;
-  }
-
-  // the key is now managed by the EVP_PKEY structure
-  (void)ec_key.release();
+  openssl_pkey pkey_deleter{pkey};
 
   cert = X509_new();
   if (!cert)

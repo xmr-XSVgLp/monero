@@ -35,6 +35,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <mutex>
 #include <boost/endian/conversion.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
@@ -320,6 +321,46 @@ namespace trezor{
     if (s_read_abortable){
       s_read_abort = true;
     }
+  }
+
+  static std::mutex s_preferred_path_mutex;
+  static std::string s_preferred_path;
+
+  void set_preferred_path(const std::string & path){
+    std::lock_guard<std::mutex> lock(s_preferred_path_mutex);
+    s_preferred_path = path;
+  }
+
+  std::string get_preferred_path(){
+    std::lock_guard<std::mutex> lock(s_preferred_path_mutex);
+    return s_preferred_path;
+  }
+
+  // The Bluetooth Trezor seen last: connecting to it again needs no new scan (CoreBluetooth finds a known
+  // peripheral by its id), which saves seconds every time a wallet opens
+  static std::mutex s_ble_known_mutex;
+  static std::string s_ble_known_id;
+  static std::string s_ble_known_name;
+
+  static void remember_ble_device(const std::string & id, const std::string & name, bool replace){
+    std::lock_guard<std::mutex> lock(s_ble_known_mutex);
+    if (!replace && !s_ble_known_id.empty())
+      return;
+    s_ble_known_id = id;
+    s_ble_known_name = name;
+  }
+
+  static bool known_ble_device(std::string & id, std::string & name){
+    std::lock_guard<std::mutex> lock(s_ble_known_mutex);
+    id = s_ble_known_id;
+    name = s_ble_known_name;
+    return !id.empty();
+  }
+
+  void forget_ble_device(){
+    std::lock_guard<std::mutex> lock(s_ble_known_mutex);
+    s_ble_known_id.clear();
+    s_ble_known_name.clear();
   }
 
   void set_read_deadline(int ms){
@@ -1270,6 +1311,7 @@ namespace trezor{
     for (const auto & d : ble::scan(4.0)){
       MDEBUG("Bluetooth Trezor found: " << d.id << " (" << d.name << ")");
       res.push_back(std::make_shared<BleTransport>(d.id, d.name));
+      remember_ble_device(d.id, d.name, false);
     }
   }
 
@@ -1287,6 +1329,7 @@ namespace trezor{
         m_name = devices.front().name;
       }
       m_conn = ble::open(m_id);
+      remember_ble_device(m_id, m_name, true);
     } catch (const std::runtime_error & e){
       throw exc::CommunicationException(e.what());
     }
@@ -1365,7 +1408,7 @@ namespace trezor{
   }
 #endif  // WITH_DEVICE_TREZOR_BLE
 
-  void enumerate(t_transport_vect & res){
+  void enumerate(t_transport_vect & res, bool force_ble){
     BridgeTransport bt;
     try{
       bt.enumerate(res);
@@ -1396,12 +1439,18 @@ namespace trezor{
     // MONERO_TREZOR_BLE=1 always scans, MONERO_TREZOR_BLE=0 never does.
     const char * env_ble = getenv("MONERO_TREZOR_BLE");
     const std::string ble_mode = env_ble ? env_ble : "";
-    if (ble_mode != "0" && (res.empty() || ble_mode == "1")){
-      hw::trezor::BleTransport btb;
-      try{
-        btb.enumerate(res);
-      } catch (const std::exception & e){
-        MERROR("BleTransport enumeration failed: " << e.what());
+    if (ble_mode != "0" && (res.empty() || ble_mode == "1" || force_ble)){
+      std::string known_id, known_name;
+      if (!force_ble && ble_mode != "1" && known_ble_device(known_id, known_name)){
+        MDEBUG("Bluetooth Trezor seen before, not scanning: " << known_id);
+        res.push_back(std::make_shared<BleTransport>(known_id, known_name));
+      } else {
+        hw::trezor::BleTransport btb;
+        try{
+          btb.enumerate(res);
+        } catch (const std::exception & e){
+          MERROR("BleTransport enumeration failed: " << e.what());
+        }
       }
     }
 #endif

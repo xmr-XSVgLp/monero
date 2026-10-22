@@ -145,7 +145,7 @@ if(Protobuf_FOUND AND USE_DEVICE_TREZOR AND TREZOR_PYTHON AND Protobuf_COMPILE_T
         endif()
 
         if (Protobuf_INCLUDE_DIR)
-            include_directories(${Protobuf_INCLUDE_DIR})
+            include_directories(SYSTEM ${Protobuf_INCLUDE_DIR})
         endif()
 
         # LibUSB support, check for particular version
